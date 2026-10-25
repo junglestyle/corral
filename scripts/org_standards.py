@@ -1,14 +1,13 @@
 """Keeps docs/org-standards.md an unchanged copy of the org's STANDARDS.md.
 
 check         the copy is unchanged since it was synced (offline; make check runs it)
-behind        the org's main has moved past the copy's commit (CI warns on it)
+behind        the org's main has moved past the copy's commit (CI fails on it)
 sync [branch] copy the org file from a branch, main by default (make sync-standards)
 """
 
 from __future__ import annotations
 
 import hashlib
-import os
 import re
 import subprocess
 import sys
@@ -54,12 +53,7 @@ def main(args: list[str]) -> None:
         commit, _, _ = read_copy()
         main_commit = head_of("main")
         if commit != main_commit:
-            message = f"the org standards moved on: copy at {commit[:7]}, main at {main_commit[:7]}"
-            # In GitHub Actions, a note on a passing job: the org moving on shouldn't block unrelated work.
-            if os.environ.get("GITHUB_ACTIONS") == "true":
-                print(f"::warning title=org standards::{message}; run make sync-standards")
-                return
-            raise SystemExit(message)
+            raise SystemExit(f"the org standards moved on: copy at {commit[:7]}, main at {main_commit[:7]}")
     elif command == "sync":
         commit = head_of(args[1] if len(args) > 1 else "main")
         url = f"https://raw.githubusercontent.com/junglestyle/.github/{commit}/STANDARDS.md"
