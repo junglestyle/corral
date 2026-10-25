@@ -17,10 +17,12 @@ the work needs, and gets out of the way of a machine that's been paused.
    pipelines chain without clocks.
 3. **Priorities with aging.** Higher priority runs first. Waiting raises a job's effective priority, so low work
    can't starve.
-4. **Chunking hints.** A job can be told how much work it can likely finish within a time window, so a worker frees
+4. **Workload awareness.** A worker notices when something other than corral is using its GPU, stops taking GPU
+   work while that lasts, and raises an alert when it blocks queued work for too long.
+5. **Chunking hints.** A job can be told how much work it can likely finish within a time window, so a worker frees
    up predictably. The hint is advisory.
 
-Out of scope for now: auto-pause on foreign use of a resource, more than one job per worker at a time, job
+Out of scope for now: more than one job per worker at a time, job
 dependencies beyond `then`, and multi-user anything.
 
 ## Pieces
@@ -111,6 +113,23 @@ Pause is per worker, or `all`, and is stored on the server so it survives restar
 
 Because jobs chunk to a window, a plain pause frees the machine within about that window.
 
+## Foreign GPU use
+
+Before each lease and with each heartbeat, a worker that offers `gpu` lists the GPU's compute processes
+(`nvidia-smi --query-compute-apps`). Any process that isn't the worker's own job or on the worker's `ignore` list
+is foreign. Graphics-only use, like a desktop compositor, doesn't show up as compute, so it doesn't count.
+
+While anything foreign is there, the worker is `blocked`. It drops `gpu` from what it offers, so it can still take
+work that doesn't need the GPU. When the GPU is clear again it unblocks on its own. Blocked isn't paused: nobody
+has to resume it.
+
+A job already running when foreign use appears is left alone. Two workloads may then share the GPU, and if one
+runs out of memory, that's what the alert is for.
+
+The server raises a `worker.blocked` event when a worker has been blocked for `block_alert_after` (default 15 min)
+while GPU jobs are waiting, naming the foreign processes. It raises `worker.unblocked` when it clears. These go to
+webhooks like any other event, so an ntfy topic gets a push. A block with nothing waiting stays quiet.
+
 ## Completion
 
 When a job ends, in one transaction, the server records the outcome, enqueues each spec in `then` (success only),
@@ -122,7 +141,7 @@ and queues one event per matching webhook:
  "result": {"items": 7}}
 ```
 
-Webhooks are configured on the server with an optional kind filter. Delivery is at-least-once with retries, so
+Webhooks are configured on the server with an optional filter on event and kind. Delivery is at-least-once with retries, so
 receivers dedupe on `job.id`. A plain ntfy topic works as a receiver.
 
 `then` covers chains whose next step is known up front. Webhooks cover everything else: a service outside corral
@@ -150,7 +169,7 @@ the hint.
 | `POST` | `/lease` | Worker asks for a job (long poll) |
 | `POST` | `/leases/{id}/heartbeat` | Extend |
 | `POST` | `/leases/{id}/finish` | Exit status and result |
-| `GET` | `/workers` | Workers, their state, current job |
+| `GET` | `/workers` | Workers, their state (`idle`, `running`, `draining`, `paused`, `blocked`), current job, foreign processes |
 | `POST` | `/workers/{name}/pause` | `{"now": bool, "for_seconds": int?}` |
 | `POST` | `/workers/{name}/resume` | |
 
