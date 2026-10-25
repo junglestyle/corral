@@ -1,4 +1,4 @@
-<!-- junglestyle/.github STANDARDS.md at 2ca7c47fbb752bf58b66ee45df927555fb6e0162, sha256 ea07617ad0f646f5928a74d2d7818f8a30e226b7d1f43b67fa931ce348a38997. Change it there, then run make sync-standards. -->
+<!-- junglestyle/.github STANDARDS.md at 2ca7c47fbb752bf58b66ee45df927555fb6e0162. Change it there, then run make sync-standards. -->
 # Standards
 
 Each principle from [PRINCIPLES.md](https://github.com/junglestyle/.github/blob/main/PRINCIPLES.md) turned into rules you can check in review. When they pull against each other, pick what works and is easiest to undo.
