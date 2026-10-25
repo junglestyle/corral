@@ -34,7 +34,7 @@ dependencies beyond `then`, and multi-user anything.
 - **Dashboard** (milestone 5). Pages served by the server. It reads and pauses through the same API as the CLI, so
   it never talks to workers directly.
 - **CLI.** `corral` talks to the server for everything: `server`, `worker`, `enqueue`, `ls`, `pause`, `resume`,
-  `cancel`.
+  `kill`, `cancel`.
 
 Every call uses one bearer token from the environment, and the API is meant for a private network. Jobs carry
 references (paths, ids), never payloads, so data stays where it lives.
@@ -106,10 +106,14 @@ Pause is per worker, or `all`, and is stored on the server so it survives restar
 
 - `corral pause gpu-host` stops leasing to that worker. The running job finishes. `corral ls` shows `draining` until it
   does, then `paused`.
-- `corral pause gpu-host --now` also kills the running job and requeues it without counting an attempt.
+- `corral pause gpu-host --now` also kills the running job, as `corral kill` does.
 - `corral pause gpu-host --for 2h` does the same, then resumes on its own when the time is up. Any duration;
   `--now` combines with it.
 - `corral resume gpu-host` starts leasing again, early or not.
+
+`corral kill 42` stops one running job and puts it back in the queue, without counting an attempt and keeping its
+place in line (aging continues from when it was first enqueued). The worker stays free to lease again, so the same
+job may come straight back unless the worker is paused or blocked. `cancel` is the one that removes a job for good.
 
 Because jobs chunk to a window, a plain pause frees the machine within about that window.
 
@@ -123,7 +127,7 @@ While anything foreign is there, the worker is `blocked`. It drops `gpu` from wh
 work that doesn't need the GPU. When the GPU is clear again it unblocks on its own. Blocked isn't paused: nobody
 has to resume it.
 
-A job already running when foreign use appears is left alone. Two workloads may then share the GPU, and if one
+A job already running when foreign use appears is left alone; `corral kill` it by hand if it's in the way. Two workloads may then share the GPU, and if one
 runs out of memory, that's what the alert is for.
 
 The server raises a `worker.blocked` event when a worker has been blocked for `block_alert_after` (default 15 min)
@@ -165,6 +169,7 @@ the hint.
 | `POST` | `/jobs` | Enqueue (honors `key`) |
 | `GET` | `/jobs?state=` | List |
 | `GET` | `/jobs/{id}` | One job |
+| `POST` | `/jobs/{id}/kill` | Kill a leased job and requeue it |
 | `POST` | `/jobs/{id}/cancel` | Cancel a queued job, or kill and cancel a leased one |
 | `POST` | `/lease` | Worker asks for a job (long poll) |
 | `POST` | `/leases/{id}/heartbeat` | Extend |
@@ -173,7 +178,7 @@ the hint.
 | `POST` | `/workers/{name}/pause` | `{"now": bool, "for_seconds": int?}` |
 | `POST` | `/workers/{name}/resume` | |
 
-A cancel or `pause --now` reaches a running job through the heartbeat response, which tells the worker to kill it.
+A kill, cancel or `pause --now` reaches a running job through the heartbeat response, which tells the worker to kill it.
 
 ## Example: a speech pipeline
 
