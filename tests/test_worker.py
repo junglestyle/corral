@@ -145,3 +145,14 @@ def test_lost_lease_stops_the_process_and_drops_the_outcome(
     after = client.http.get(f"/jobs/{job['id']}").json()
     assert after["state"] == "queued" and after["attempts"] == 1
     assert [j["kind"] for j in client.jobs(["queued"], 10)] == ["slow"]
+
+
+def test_kinds_drop_ins_add_kinds_and_never_override(tmp_path: Path) -> None:
+    (tmp_path / "worker.toml").write_text('name = "w"\n[kinds.a]\nargv = ["true"]\n')
+    (tmp_path / "kinds.d").mkdir()
+    (tmp_path / "kinds.d" / "b.toml").write_text('[kinds.b]\nargv = ["true"]\ntimeout = "1m"\n')
+    assert sorted(worker.load_config(tmp_path / "worker.toml").kinds) == ["a", "b"]
+
+    (tmp_path / "kinds.d" / "c.toml").write_text('[kinds.a]\nargv = ["false"]\n')
+    with pytest.raises(SystemExit, match="already configured"):
+        worker.load_config(tmp_path / "worker.toml")

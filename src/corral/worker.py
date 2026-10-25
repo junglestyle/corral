@@ -41,14 +41,27 @@ class Config:
 
 
 def load_config(path: Path) -> Config:
+    """Reads the worker's config, plus any kinds in `kinds.d/*.toml` next to it."""
     raw = tomllib.loads(path.read_text())
-    kinds = {
+    kinds = _kinds(raw)
+    # Drop-ins let each project install its own kinds without editing a file another project owns.
+    for drop_in in sorted((path.parent / "kinds.d").glob("*.toml")):
+        for name, kind in _kinds(tomllib.loads(drop_in.read_text())).items():
+            if name in kinds:
+                raise SystemExit(f"{drop_in}: kind {name} is already configured")
+            kinds[name] = kind
+    if not kinds:
+        raise SystemExit(
+            f"{path}: no [kinds] configured here or in kinds.d/, so this worker could never run anything"
+        )
+    return Config(name=raw["name"], offers=raw.get("offers", []), kinds=kinds, ignore=raw.get("ignore", []))
+
+
+def _kinds(raw: dict[str, Any]) -> dict[str, Kind]:
+    return {
         name: Kind(argv=k["argv"], timeout=parse_duration(k["timeout"]) if "timeout" in k else None)
         for name, k in raw.get("kinds", {}).items()
     }
-    if not kinds:
-        raise SystemExit(f"{path}: no [kinds] configured, so this worker could never run anything")
-    return Config(name=raw["name"], offers=raw.get("offers", []), kinds=kinds, ignore=raw.get("ignore", []))
 
 
 def run(config: Config, client: Client) -> None:

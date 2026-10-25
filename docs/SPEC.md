@@ -202,17 +202,20 @@ Heartbeat and finish answer `409` when the lease id is no longer current. Enqueu
 
 ## Example: a speech pipeline
 
-[Hearsay](https://github.com/junglestyle/hearsay) transcribes on a GPU host, reprocesses on a NAS, and hands off to
+[Hearsay](https://github.com/junglestyle/hearsay) assembles captured audio into conversations on a NAS,
+transcribes them on a GPU host, folds the transcripts back in on the NAS, and hands off to
 [Idea Machine](https://github.com/junglestyle/ideamachine), all on hourly timers today.
 
-| Today | With corral |
-| --- | --- |
-| Transcribe on the GPU host at :00 | The capture receiver enqueues `hearsay.transcribe` (`needs: [gpu]`, `key: hearsay.transcribe`) when a conversation closes |
-| Reprocess on the NAS at :30 | Transcribe's `then` enqueues `hearsay.reprocess` (`needs: [nas]`, `key: hearsay.reprocess`) |
-| Idea Machine at :45 | Reprocess's `then` enqueues `ideamachine.run` (`key: ideamachine.run`) |
+| Step | Kind | Needs |
+| --- | --- | --- |
+| Assemble new audio into conversation WAVs | `hearsay.reprocess` | `nas` |
+| Transcribe the WAVs that changed | `hearsay.transcribe` | `gpu` |
+| Fold the transcripts into the stream | `hearsay.reprocess` | `nas` |
+| Read the stream | `ideamachine.run` | `nas` |
 
-The timers can stay at a lower frequency as a safety net, each enqueueing its job with its key so nothing doubles
-up. Transcribe reads `CORRAL_SUGGESTED_ITEMS` to cap how many conversations it takes per run.
+When a capture arrives, the receiver enqueues the first step with the rest nested in `then`. Each step has its own
+`key`, so captures that arrive while the chain is waiting add nothing, and coalescing never drops a later step. The
+same kind appears twice under two keys. An hourly timer enqueues the same chain as a safety net.
 
 ## Milestones
 
