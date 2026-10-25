@@ -1,7 +1,7 @@
 """Keeps docs/org-standards.md an unchanged copy of the org's STANDARDS.md.
 
 check         the copy is unchanged since it was synced (offline; make check runs it)
-behind        the org's main has moved past the copy's commit (CI warns on it)
+behind        the org's main has moved past the copy's commit (CI fails on it)
 sync [branch] copy the org file from a branch, main by default (make sync-standards)
 """
 

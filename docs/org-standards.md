@@ -1,9 +1,9 @@
-<!-- junglestyle/.github STANDARDS.md at c7305791f56ed2db82e7d2a2471f62ba1780f114, sha256 adf6cc49680b0259b30862e30c26c3acf3963bcb3d6ecd0e5772be426ed4c4ba. Change it there, then run make sync-standards. -->
+<!-- junglestyle/.github STANDARDS.md at 2ca7c47fbb752bf58b66ee45df927555fb6e0162, sha256 ea07617ad0f646f5928a74d2d7818f8a30e226b7d1f43b67fa931ce348a38997. Change it there, then run make sync-standards. -->
 # Standards
 
 Each principle from [PRINCIPLES.md](https://github.com/junglestyle/.github/blob/main/PRINCIPLES.md) turned into rules you can check in review. When they pull against each other, pick what works and is easiest to undo.
 
-Each repo keeps this file unchanged as `docs/org-standards.md`, headed by the commit it came from, and puts its own rules and examples in `docs/standards.md`. Where the two differ, the repo's file wins and names the rule it overrides. The repo's checks fail if the copy was edited by hand, and warn when this file has moved on; resyncing is one command.
+Each repo keeps this file unchanged as `docs/org-standards.md`, headed by the commit it came from, and puts its own rules and examples in `docs/standards.md`. Where the two differ, the repo's file wins and names the rule it overrides. The repo's checks fail if the copy was edited by hand or this file has moved on; resyncing is one command.
 
 ## Jungle Style
 
