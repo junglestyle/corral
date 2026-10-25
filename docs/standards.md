@@ -74,19 +74,23 @@ Focused tests of consequential behavior, at boundaries that stay put. Count is n
 
 ## Comments and names
 
-- Names say what; comments say why, and only when the why isn't obvious: a constraint, an invariant, a tradeoff.
-- No comments that restate the code, and no commented-out code.
+- Names say what; comments say why.
+- Keep a comment only if a maintainer would lose a fact that the code, types, and tests don't already state. No
+  comments that restate the code, and no commented-out code.
+- The facts worth a comment are constraints the code can't show: concurrency and lifecycle rules, security
+  boundaries, protocol quirks, and the tradeoff behind a non-obvious choice.
 
 ## Prose
 
-For docs, commit messages, and PR descriptions.
+For docs, commit messages, and PR descriptions. Follow
+[agent-style](https://github.com/yzhao062/agent-style/blob/7da99e0b0610aca4e4d340351bd802bfd448c894/RULES.md),
+with these house rules taking precedence:
 
 - Describe the product as it is meant to be. No dates, approval trails, or "replacing X"; history lives in git.
-- Say what, then why. A decision is the choice and its reason in a few lines; drop the pricing, the alternatives
-  tour, and the backstory.
 - Link instead of restating. Each fact has one home, the same as in code.
-- Plain words, short sentences, active voice. Tables for reference, prose for reasoning, lists only when the
-  content is a list.
+- Arrange sections in the order a reader needs them.
 - Name roles, not machines: "the NAS" or "a GPU host", never a hostname, token, or path from a real deployment.
-- Real consumers appear only as examples. Corral is a general tool, and the docs don't assume one owner.
-- No filler, hype, or hedging. If a sentence could be cut without loss, cut it.
+- Error messages, log lines, and CLI output are interface. Changing their wording is an interface change, not a
+  style edit.
+- Contractions are fine, and headings use sentence case.
+- "X, not Y" is fine where it prevents a real confusion, such as blocked versus paused.
