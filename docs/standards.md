@@ -90,6 +90,7 @@ with these house rules taking precedence:
 - Link instead of restating. Each fact has one home, the same as in code.
 - Arrange sections in the order a reader needs them.
 - Name roles, not machines: "the NAS" or "a GPU host", never a hostname, token, or path from a real deployment.
+- Real consumers appear only as examples. Corral is a general tool, and the docs assume no single owner.
 - Error messages, log lines, and CLI output are interface. Changing their wording is an interface change, not a
   style edit.
 - Contractions are fine, and headings use sentence case.
