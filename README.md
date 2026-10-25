@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/corral-lockup-dark.svg">
+    <img src="docs/assets/corral-lockup-light.svg" alt="corral" width="200">
+  </picture>
+</p>
+
 # corral
 
 Priority job scheduler for opportunistic local compute.
