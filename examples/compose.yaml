@@ -1,0 +1,10 @@
+services:
+  corral:
+    build: ..
+    restart: unless-stopped
+    environment:
+      CORRAL_TOKEN: ${CORRAL_TOKEN:?set CORRAL_TOKEN}
+    ports:
+      - "8700:8700"
+    volumes:
+      - ./data:/data

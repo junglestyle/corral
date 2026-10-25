@@ -32,8 +32,19 @@ flowchart LR
 - **Workers pull.** Each worker advertises capability labels and leases jobs it can run, so adding a machine is
   starting a worker.
 
-> **In development:** this repository holds the specification. There is no runnable release yet.
+## Try it
 
-See the [specification](docs/SPEC.md) and [stack and decisions](docs/stack.md).
+```sh
+uv sync
+export CORRAL_URL=http://127.0.0.1:8700 CORRAL_TOKEN=change-me
+uv run corral server &
+printf 'name = "laptop"\noffers = ["cpu"]\n[kinds.hello]\nargv = ["echo", "hello"]\n' > hello.toml
+uv run corral worker hello.toml &
+uv run corral enqueue hello
+uv run corral ls
+```
+
+Webhooks and chunking hints are specified but not built yet. See [running corral](docs/running.md), the
+[specification](docs/SPEC.md), and [stack and decisions](docs/stack.md).
 
 Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).

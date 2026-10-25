@@ -1,0 +1,12 @@
+name = "gpu-host"
+offers = ["gpu", "cpu"]
+
+# GPU compute processes that don't count as foreign, matched by executable name.
+ignore = []
+
+[kinds."hearsay.transcribe"]
+argv = ["/opt/hearsay/.venv/bin/python", "-m", "hearsay.transcribe"]
+timeout = "30m"
+
+[kinds."ideamachine.run"]
+argv = ["/opt/ideamachine/.venv/bin/im", "run"]

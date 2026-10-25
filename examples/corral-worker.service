@@ -1,0 +1,15 @@
+# ~/.config/systemd/user/corral-worker.service
+[Unit]
+Description=corral worker
+After=network-online.target
+
+[Service]
+EnvironmentFile=%h/.config/corral/env
+ExecStart=%h/.local/bin/corral worker %h/.config/corral/worker.toml
+Restart=always
+RestartSec=5
+# Stopping the worker also stops the job it's running, so the lease is never held by an orphan.
+KillMode=control-group
+
+[Install]
+WantedBy=default.target
