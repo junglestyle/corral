@@ -12,9 +12,7 @@ jobs:
       - run: uv sync --frozen
       - run: make check
   org-standards:
-    # A warning, not a gate: the org file moving on shouldn't block unrelated work.
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - run: python3 scripts/org_standards.py behind
