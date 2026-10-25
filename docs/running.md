@@ -16,7 +16,24 @@ corral server --db /data/corral.sqlite --host 0.0.0.0 --port 8700 --aging 1h
 `--aging` is how much waiting is worth one priority point (see [ordering](SPEC.md#ordering-and-aging)). The
 SQLite file is the whole state; back it up like any other file, or don't, since losing it loses only the queue.
 
-[`examples/compose.yaml`](../examples/compose.yaml) runs it with Docker Compose from the repo's `Dockerfile`.
+Run it in Docker with [`examples/compose.yaml`](../examples/compose.yaml), which builds the repo's `Dockerfile`:
+
+```sh
+docker compose --env-file /path/to/env -f examples/compose.yaml up -d --build
+```
+
+The env file sets three variables, and a worker on the same host can share it for `CORRAL_URL` and
+`CORRAL_TOKEN`:
+
+| Variable | Meaning |
+| --- | --- |
+| `CORRAL_TOKEN` | The shared bearer token |
+| `CORRAL_HOST` | The one address the server listens on, such as the host's VPN address |
+| `CORRAL_DATA` | Host directory for the SQLite file |
+
+The container uses host networking so the server binds `CORRAL_HOST` and nothing else; a NAS often has a public
+IPv6 address that a published port would also answer on. Docker restarts the server at boot, and again until
+`CORRAL_HOST` exists if its interface comes up late. Re-run the same command after pulling to update it.
 
 ## Worker
 
@@ -47,7 +64,10 @@ starts at boot without a login.
 
 On a host where user units don't survive an upgrade, such as a TrueNAS NAS, run
 [`examples/system-worker.sh`](../examples/system-worker.sh) at boot instead. It installs corral under one directory
-on a data pool and starts the worker as a root system service, so its jobs can use Docker.
+on a data pool and starts the worker as a root system service, so its jobs can use Docker. The env file there can
+be the server's too.
+
+Workers run on the host, not in a container (see [ADR-005](stack.md#adr-005-server-in-a-container-workers-on-the-host)).
 
 ## CLI
 

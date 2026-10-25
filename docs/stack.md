@@ -6,7 +6,7 @@
 | Server | FastAPI, uvicorn |
 | State | SQLite (WAL) |
 | Worker | One process per machine, subprocess with `shell=False` |
-| Deployment | Docker Compose for the server, systemd user unit for workers |
+| Deployment | Docker Compose for the server, a systemd unit on the host for workers |
 | Transport | HTTP on a private network, bearer token |
 | Development | uv, Ruff, mypy, pytest |
 | License | MIT |
@@ -31,3 +31,9 @@ queue the wrong kind but can't make a worker run arbitrary commands.
 
 Leases expire and jobs rerun. Exactly-once would need coordination most workloads don't need: ones that rebuild
 from source and cache by content are already safe to rerun.
+
+## ADR-005: Server in a container, workers on the host
+
+The server is an HTTP service and a SQLite file, so a container is the simplest thing that survives reboots and
+upgrades on a NAS. A worker spawns jobs on its host, uses its Docker, and watches its GPU for other processes. In a
+container it would need the Docker socket, the GPU, and the host's PID namespace, so it runs on the host.
