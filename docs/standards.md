@@ -7,11 +7,12 @@ works and is easiest to undo.
 
 One fact, one place. DRY is about knowledge, not text.
 
-- A rule that the code and docs both state (a default, a state name, an env var) is defined once in code, and the
-  docs name it rather than restate its logic.
+- A rule has one executable implementation. The spec still describes the behavior a user can observe, so a reader
+  never has to open the code to learn what corral does; it just doesn't carry a second copy of the logic.
 - Two blocks that look alike but would change for different reasons stay separate. Duplication is cheaper than the
   wrong abstraction.
-- Extract on the third real use, not the second similar-looking one.
+- Lean toward extracting on the third real use, not the second similar-looking one. A critical invariant is the
+  exception: two implementations of it are already one too many.
 
 ## YAGNI
 
@@ -37,8 +38,8 @@ From the Zen of Python, the parts that bite here:
 Accept imperfection that's honest about itself.
 
 - Plain, finished, and slightly rough beats polished and unfinished. Ship the small thing that works.
-- Leave a sharp edge exposed rather than papering over it: a known limit goes in the docs or one comment, not in a
-  workaround.
+- Be honest about sharp edges. A known limit goes in the docs or one comment; a workaround is fine when it's small
+  and says what it works around.
 - Don't gold-plate output, logging, or UI. Good enough to read is good enough.
 
 ## Wu wei
@@ -48,7 +49,8 @@ Effortless action: work with the grain, don't force it.
 - Lean on what's already there: the stdlib, SQLite's transactions, the OS's process model, systemd's restarts.
 - Prefer state the system converges to (expired leases requeue, blocks clear themselves) over steps someone must
   remember.
-- Nothing should need tending. A feature that creates recurring work for its owner is a bug.
+- Minimize recurring operational work, and make unavoidable maintenance explicit. A feature that quietly creates
+  chores for its owner is a bug; so is elaborate automation to avoid an occasional manual step.
 
 ## Pragmatic Programmer
 
@@ -61,7 +63,7 @@ Effortless action: work with the grain, don't force it.
 
 ## Testing
 
-Few tests, at boundaries that stay put.
+Focused tests of consequential behavior, at boundaries that stay put. Count is not the goal.
 
 - Test what a user of the queue would notice: ordering and aging, lease expiry, pause and drain, kill, `then`,
   coalescing, crash recovery.
