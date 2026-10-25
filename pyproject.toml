@@ -3,7 +3,7 @@ name = "corral"
 version = "0.1.0"
 description = "Priority job scheduler for opportunistic local compute"
 readme = "README.md"
-license = "Apache-2.0"
+license = "MIT"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",

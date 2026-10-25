@@ -9,7 +9,7 @@
 | Deployment | Docker Compose for the server, systemd user unit for workers |
 | Transport | HTTP on a private network, bearer token |
 | Development | uv, Ruff, mypy, pytest |
-| License | Apache-2.0 |
+| License | MIT |
 
 ## ADR-001: Server on an always-on host, workers pull
 

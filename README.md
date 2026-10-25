@@ -47,4 +47,4 @@ uv run corral ls
 Webhooks and chunking hints are specified but not built yet. See [running corral](docs/running.md), the
 [specification](docs/SPEC.md), and [stack and decisions](docs/stack.md).
 
-Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+MIT. See [LICENSE](LICENSE).

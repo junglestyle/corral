@@ -76,3 +76,17 @@ Focused tests of consequential behavior, at boundaries that stay put. Count is n
 
 - Names say what; comments say why, and only when the why isn't obvious: a constraint, an invariant, a tradeoff.
 - No comments that restate the code, and no commented-out code.
+
+## Prose
+
+For docs, commit messages, and PR descriptions.
+
+- Describe the product as it is meant to be. No dates, approval trails, or "replacing X"; history lives in git.
+- Say what, then why. A decision is the choice and its reason in a few lines; drop the pricing, the alternatives
+  tour, and the backstory.
+- Link instead of restating. Each fact has one home, the same as in code.
+- Plain words, short sentences, active voice. Tables for reference, prose for reasoning, lists only when the
+  content is a list.
+- Name roles, not machines: "the NAS" or "a GPU host", never a hostname, token, or path from a real deployment.
+- Real consumers appear only as examples. Corral is a general tool, and the docs don't assume one owner.
+- No filler, hype, or hedging. If a sentence could be cut without loss, cut it.
