@@ -5,11 +5,9 @@ on:
   pull_request:
 jobs:
   check:
-    # GitHub only hosts Ubuntu runners, so the job runs inside the same Debian image as the Dockerfile.
     runs-on: ubuntu-latest
-    container: ghcr.io/astral-sh/uv:python3.12-bookworm-slim
     steps:
-      - run: apt-get update -qq && apt-get install -y -qq git make
       - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
       - run: uv sync --frozen
       - run: make check
