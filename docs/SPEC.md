@@ -29,8 +29,7 @@ dependencies beyond `then`, and multi-user anything.
 
 - **Server.** One process on an always-on host, such as a NAS. It owns the SQLite queue, the HTTP API, and outgoing events.
 - **Worker.** One process per machine. It advertises capability labels (`gpu`, `cpu`, anything else) and leases
-  one job at a time whose needs it has, runs it, and
-  reports back.
+  one job at a time whose needs it has and whose kind it has configured, runs it, and reports back.
 - **Dashboard** (milestone 5). Pages served by the server. It reads and pauses through the same API as the CLI, so
   it never talks to workers directly.
 - **CLI.** `corral` talks to the server for everything: `server`, `worker`, `enqueue`, `ls`, `pause`, `resume`,
@@ -47,31 +46,45 @@ A job has:
 | --- | --- |
 | `id` | Server-assigned |
 | `kind` | Names what to run, e.g. `hearsay.transcribe`. Workers map kinds to argv. |
-| `needs` | Capability labels, e.g. `["gpu"]`. A worker can run the job if it offers all of them. |
+| `needs` | Capability labels, e.g. `["gpu"]`. A worker can run the job if it offers all of them and has the kind configured. |
 | `priority` | Integer 0-9, higher first. Default 5. |
 | `args` | Small JSON object passed to the job |
 | `key` | Optional coalescing key. Enqueueing a key that is already queued does nothing and returns the queued job. |
-| `then` | Optional list of job specs to enqueue on success |
+| `then` | Optional list of job specs to enqueue on success. Each is a full spec: fields it leaves out take the defaults above, not the parent's values. |
 | `state` | `queued`, `leased`, `succeeded`, `failed`, `cancelled` |
-| `attempts` | Leases so far. Default max 3. |
+| `attempts` | Leases so far |
+| `max_attempts` | Default 3. A job that exits non-zero or loses its lease is requeued until it has used them all, then `failed`. |
 
 `key` is what makes streaming input cheap. Ten items arriving in a minute can each enqueue a step that processes
 everything pending, and only one of those waits in the queue.
 
 ### Ordering and aging
 
-`effective = priority + waited_seconds / aging_seconds`, with `aging_seconds` set per server (default 600). The
-waiting job with the highest effective priority that a worker can run goes first. Ties go to the oldest. Aging is
-uncapped, so anything waiting long enough eventually wins.
+`effective = priority + waited_seconds / aging_seconds`, with `aging_seconds` set per server (default 3600). The
+waiting job with the highest effective priority that a worker can run goes first. Ties go to the oldest.
+
+Each `aging_seconds` of waiting is worth one priority point, and aging is uncapped. With the default, a priority-0
+job that has waited nine hours ties a brand-new priority-9 job. That is the intent: priority decides the order of
+work that arrives together, and nothing waits forever.
 
 ### Leases
 
-A worker asks for a job with its name and capabilities and long-polls up to 30 s. The server leases the best match
-for 60 s. While the job runs, the worker heartbeats every 15 s to extend it. If the lease expires, because the
-worker died or lost the network, the job goes back to `queued`. After `max_attempts` it is `failed`.
+A worker asks for a job with its name, capabilities and configured kinds, and long-polls up to 30 s. The server
+leases the best match for 60 s under a fresh lease id, unique to that attempt. While the job runs, the worker
+heartbeats every 15 s with the lease id to extend it, and reports the outcome with it.
 
-Jobs must therefore be safe to run twice. Pipelines that rebuild from source and cache by content already
-are.
+If the lease expires, because the worker died or lost the network, the job goes back to `queued` (or `failed`
+after `max_attempts`). A worker that asks for a new lease is by definition not running anything, so any lease
+it still holds is settled the same way straight away; this is how a restarted worker frees its old job.
+
+A heartbeat or finish with a lease id that is no longer current is rejected, and the worker kills the job and
+drops its outcome. A stale finish therefore never records a result or enqueues `then`. A worker that can't
+reach the server kills its job once the lease would have expired, so after a lease is lost, the old run
+overlaps a new one by at most one heartbeat interval if the worker is reachable, or not at all if it is not.
+
+Jobs must still be safe to run twice, because a job that finished its work but died before reporting runs
+again. Being safe to overlap for a few seconds is a stronger property and worth having, but corral keeps it
+rare rather than impossible.
 
 ## Running a job
 
@@ -97,6 +110,7 @@ corral:
 
 - `items`: how many items the job processed. This feeds the chunking hint.
 - `more`: `true` re-enqueues the same job (same kind, args and priority, aging reset) because work remains.
+  This is an ordinary enqueue, so it coalesces with an already-queued job that has the same `key`.
 
 Everything else in the result is passed through to events untouched.
 
@@ -109,13 +123,17 @@ Pause is per worker, or `all`, and is stored on the server so it survives restar
 - `corral pause gpu-host --now` also kills the running job, as `corral kill` does.
 - `corral pause gpu-host --for 2h` does the same, then resumes on its own when the time is up. Any duration;
   `--now` combines with it.
-- `corral resume gpu-host` starts leasing again, early or not.
+- `corral resume gpu-host` starts leasing again, early or not. A pause on `all` holds every worker until
+  `corral resume all`, which also clears the per-worker pauses.
 
 `corral kill 42` stops one running job and puts it back in the queue, without counting an attempt and keeping its
-place in line (aging continues from when it was first enqueued). The worker stays free to lease again, so the same
+place in line (aging continues from when it was first enqueued). The job stays `leased` until the worker reports
+it stopped, or until its lease expires if the worker never does, so it never runs in two places because of a
+kill. The worker stays free to lease again, so the same
 job may come straight back unless the worker is paused or blocked. `cancel` is the one that removes a job for good.
 
-Because jobs chunk to a window, a plain pause frees the machine within about that window.
+A plain pause frees the machine when the running job ends. For jobs that follow the chunking hint that's within
+about their kind's window; a job that ignores it runs until it finishes or hits its timeout.
 
 ## Foreign GPU use
 
@@ -140,13 +158,13 @@ When a job ends, in one transaction, the server records the outcome, enqueues ea
 and queues one event per matching webhook:
 
 ```json
-{"event": "job.finished", "job": {"id": 42, "kind": "hearsay.transcribe", "state": "succeeded",
+{"id": 1187, "event": "job.finished", "job": {"id": 42, "kind": "hearsay.transcribe", "state": "succeeded",
  "args": {}, "attempts": 1, "worker": "gpu-host", "started_at": "...", "finished_at": "..."},
  "result": {"items": 7}}
 ```
 
 Webhooks are configured on the server with an optional filter on event and kind. Delivery is at-least-once with retries, so
-receivers dedupe on `job.id`. A plain ntfy topic works as a receiver.
+receivers dedupe on the event's `id`, which every event carries and every retry of it repeats. A plain ntfy topic works as a receiver.
 
 `then` covers chains whose next step is known up front. Webhooks cover everything else: a service outside corral
 that decides for itself what to enqueue.
@@ -179,6 +197,8 @@ the hint.
 | `POST` | `/workers/{name}/resume` | |
 
 A kill, cancel or `pause --now` reaches a running job through the heartbeat response, which tells the worker to kill it.
+Heartbeat and finish answer `409` when the lease id is no longer current. Enqueue answers `201` for a new job and
+`200` when `key` coalesced it into one already queued.
 
 ## Example: a speech pipeline
 
@@ -197,7 +217,8 @@ up. Transcribe reads `CORRAL_SUGGESTED_ITEMS` to cap how many conversations it t
 ## Milestones
 
 1. Spec and skeleton (this document).
-2. Server, worker, and CLI: queue, aging, leases, pause, `then`, `key`.
-3. Webhooks and chunking hints.
-4. First real consumer: the speech pipeline above.
+2. Server, worker, and CLI: queue, aging, leases, pause, kill, `then`, `key`, and foreign-GPU blocking on the
+   worker.
+3. First real consumer: the speech pipeline above, running end to end on `then` and `key`.
+4. Webhooks, including the `worker.blocked` alert, and chunking hints, averaged from the consumer's real timings.
 5. Dashboard, served by the server over the same API: queue, history, workers, pause and resume.
