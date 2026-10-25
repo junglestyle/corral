@@ -1,6 +1,6 @@
 # Working on corral
 
-Corral is a small job queue for one owner's home machines. Keep it austere: the fewest concepts that meet the
+Corral is a flexible, resource-aware work queue. Keep it austere: the fewest concepts that meet the
 [specification](docs/SPEC.md), no extension points for imagined needs, duplication over a wrong abstraction.
 
 Read before changing behavior:
