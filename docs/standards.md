@@ -1,7 +1,17 @@
 # Coding standards
 
-Six ideas, each turned into something you can check in review. When they pull against each other, pick what
-works and is easiest to undo.
+Copied from the [org standards](https://github.com/junglestyle/.github/blob/main/STANDARDS.md), with corral's
+examples and rules. Each principle from [PRINCIPLES.md](https://github.com/junglestyle/.github/blob/main/PRINCIPLES.md)
+is turned into something you can check in review. When they pull against each other, pick what works and is easiest
+to undo.
+
+## Jungle Style
+
+Use what's already racked.
+
+- Use the stdlib first, then what's already in the stack, then the OS, the database, and the init system. A new
+  dependency comes last and gets a one-line reason in the commit.
+- Lean on SQLite's transactions, the OS's process model, and systemd's restarts before writing your own.
 
 ## DRY
 
@@ -11,7 +21,7 @@ One fact, one place. DRY is about knowledge, not text.
   never has to open the code to learn what corral does; it just doesn't carry a second copy of the logic.
 - Two blocks that look alike but would change for different reasons stay separate. Duplication is cheaper than the
   wrong abstraction.
-- Lean toward extracting on the third real use, not the second similar-looking one. A critical invariant is the
+- Extract on the third real use, not the second similar-looking one. A critical invariant is the
   exception: two implementations of it are already one too many.
 
 ## YAGNI
@@ -44,9 +54,8 @@ Accept imperfection that's honest about itself.
 
 ## Wu wei
 
-Effortless action: work with the grain, don't force it.
+Work with the grain. Don't force it.
 
-- Lean on what's already there: the stdlib, SQLite's transactions, the OS's process model, systemd's restarts.
 - Prefer state the system converges to (expired leases requeue, blocks clear themselves) over steps someone must
   remember.
 - Minimize recurring operational work, and make unavoidable maintenance explicit. A feature that quietly creates
@@ -63,7 +72,7 @@ Effortless action: work with the grain, don't force it.
 
 ## Testing
 
-Focused tests of consequential behavior, at boundaries that stay put. Count is not the goal.
+Few, focused tests of consequential behavior, at boundaries that stay put.
 
 - Test what a user of the queue would notice: ordering and aging, lease expiry, pause and drain, kill, `then`,
   coalescing, crash recovery.
@@ -72,6 +81,16 @@ Focused tests of consequential behavior, at boundaries that stay put. Count is n
 - Before adding a test, ask what realistic regression it catches and whether it survives a refactor. If the answer is
   weak, skip it.
 
+## Running it
+
+- One command runs local checks and CI: `make check`. Install and deployment steps live in [running.md](running.md)
+  and `examples/`, not scattered across other docs.
+- The README says what the project is and how to run it, in that order.
+
+## Privacy
+
+- Never commit hostnames, tokens, personal context, or deployment config. Config shape lives in `examples/`.
+
 ## Comments and names
 
 - Names say what; comments say why.
@@ -79,6 +98,7 @@ Focused tests of consequential behavior, at boundaries that stay put. Count is n
   comments that restate the code, and no commented-out code.
 - The facts worth a comment are constraints the code can't show: concurrency and lifecycle rules, security
   boundaries, protocol quirks, and the tradeoff behind a non-obvious choice.
+- Project names are dumb and Linuxy: short, lowercase, nothing producty.
 
 ## Prose
 
@@ -95,3 +115,4 @@ with these house rules taking precedence:
   style edit.
 - Contractions are fine, and headings use sentence case.
 - "X, not Y" is fine where it prevents a real confusion, such as blocked versus paused.
+- When writing up a problem, separate evidence, inference, and unknowns, and label which is which.

@@ -9,6 +9,7 @@ Read before changing behavior:
 - [Stack and decisions](docs/stack.md): tools and the decisions behind them
 - [Running corral](docs/running.md): configuration and deployment
 
-Docs live in `docs/` and change with behavior. Never commit hostnames, tokens, or deployment config.
+Docs live in `docs/` and change with behavior. Never commit hostnames, tokens, or deployment config (see
+[Privacy](docs/standards.md#privacy)).
 
 `make check` runs everything CI runs.
