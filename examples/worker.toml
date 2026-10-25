@@ -4,9 +4,7 @@ offers = ["gpu", "cpu"]
 # GPU compute processes that don't count as foreign, matched by executable name.
 ignore = []
 
+# Kinds can also go in kinds.d/*.toml next to this file, one file per project.
 [kinds."hearsay.transcribe"]
 argv = ["/opt/hearsay/.venv/bin/python", "-m", "hearsay.transcribe"]
 timeout = "30m"
-
-[kinds."ideamachine.run"]
-argv = ["/opt/ideamachine/.venv/bin/im", "run"]

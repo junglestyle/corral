@@ -35,11 +35,19 @@ The config names the worker, the capability labels it offers, and the kinds it c
 | `kinds.<kind>.argv` | Command to run, without a shell |
 | `kinds.<kind>.timeout` | Optional, e.g. `30m`. A job that runs longer is killed and counts as a failed attempt. |
 
+Kinds can also go in `kinds.d/*.toml` next to the config, in the same `[kinds.<kind>]` form, so each project that
+runs on a worker installs its own file. A kind configured twice is an error. The worker reads its config at start,
+so restart it after changing either.
+
 Run it as a systemd user unit, as in
 [`examples/corral-worker.service`](../examples/corral-worker.service), with `CORRAL_URL` and `CORRAL_TOKEN` in
 the unit's `EnvironmentFile`. systemd restarts the worker if it dies, and stopping the unit stops its job too, so
 nothing keeps running under a lease the server has given away. Run `loginctl enable-linger` so the worker
 starts at boot without a login.
+
+On a host where user units don't survive an upgrade, such as a TrueNAS NAS, run
+[`examples/system-worker.sh`](../examples/system-worker.sh) at boot instead. It installs corral under one directory
+on a data pool and starts the worker as a root system service, so its jobs can use Docker.
 
 ## CLI
 
