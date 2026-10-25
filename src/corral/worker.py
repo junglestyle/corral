@@ -41,12 +41,18 @@ class Config:
 
 
 def load_config(path: Path) -> Config:
-    """Reads the worker's config, plus any kinds in `kinds.d/*.toml` next to it."""
-    raw = tomllib.loads(path.read_text())
-    kinds = _kinds(raw)
+    """Reads the worker's config, plus any kinds in `kinds.d/*.toml` next to it.
+
+    A bad config exits with the file and the problem, not a traceback: the worker runs under systemd, and the
+    journal should say which file to fix.
+    """
+    raw = _read(path)
+    if "name" not in raw:
+        raise SystemExit(f"{path}: no name")
+    kinds = _kinds(path, raw)
     # Drop-ins let each project install its own kinds without editing a file another project owns.
     for drop_in in sorted((path.parent / "kinds.d").glob("*.toml")):
-        for name, kind in _kinds(tomllib.loads(drop_in.read_text())).items():
+        for name, kind in _kinds(drop_in, _read(drop_in)).items():
             if name in kinds:
                 raise SystemExit(f"{drop_in}: kind {name} is already configured")
             kinds[name] = kind
@@ -57,11 +63,25 @@ def load_config(path: Path) -> Config:
     return Config(name=raw["name"], offers=raw.get("offers", []), kinds=kinds, ignore=raw.get("ignore", []))
 
 
-def _kinds(raw: dict[str, Any]) -> dict[str, Kind]:
-    return {
-        name: Kind(argv=k["argv"], timeout=parse_duration(k["timeout"]) if "timeout" in k else None)
-        for name, k in raw.get("kinds", {}).items()
-    }
+def _read(path: Path) -> dict[str, Any]:
+    try:
+        return tomllib.loads(path.read_text())
+    except (OSError, tomllib.TOMLDecodeError) as e:
+        raise SystemExit(f"{path}: {e}") from None
+
+
+def _kinds(path: Path, raw: dict[str, Any]) -> dict[str, Kind]:
+    kinds = {}
+    for name, k in raw.get("kinds", {}).items():
+        argv = k.get("argv")
+        if not isinstance(argv, list) or not argv or not all(isinstance(a, str) for a in argv):
+            raise SystemExit(f"{path}: kind {name} needs argv, a non-empty list of strings")
+        try:
+            timeout = parse_duration(k["timeout"]) if "timeout" in k else None
+        except ValueError as e:
+            raise SystemExit(f"{path}: kind {name}: {e}") from None
+        kinds[name] = Kind(argv=argv, timeout=timeout)
+    return kinds
 
 
 def run(config: Config, client: Client) -> None:

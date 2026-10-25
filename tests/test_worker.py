@@ -156,3 +156,8 @@ def test_kinds_drop_ins_add_kinds_and_never_override(tmp_path: Path) -> None:
     (tmp_path / "kinds.d" / "c.toml").write_text('[kinds.a]\nargv = ["false"]\n')
     with pytest.raises(SystemExit, match="already configured"):
         worker.load_config(tmp_path / "worker.toml")
+
+    # A broken drop-in is named, so the journal says which file to fix.
+    (tmp_path / "kinds.d" / "c.toml").write_text("[kinds.c\n")
+    with pytest.raises(SystemExit, match=r"c\.toml"):
+        worker.load_config(tmp_path / "worker.toml")
