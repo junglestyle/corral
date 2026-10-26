@@ -12,4 +12,6 @@ jobs:
       - run: uv sync --frozen
       - run: make check
   standards:
-    uses: junglestyle/.github/.github/workflows/standards-check.yml@main
+    uses: junglestyle/.github/.github/workflows/standards-check.yml@org-standards-required
+    with:
+      standards_ref: org-standards-required
