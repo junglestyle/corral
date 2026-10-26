@@ -1,64 +1,48 @@
-<!-- junglestyle/.github code-standards/README.md at 02947e75f593e165c491e947898134f05cca5421. Change it there, then run make sync-standards. -->
+<!-- junglestyle/.github code-standards/README.md at 030cfbb6b56e8e1d81aa22da23c81a768480226e. Change it there, then run make sync-standards. -->
 # Standards
 
-Each principle from [PRINCIPLES.md](https://github.com/junglestyle/.github/blob/main/PRINCIPLES.md) turned into rules you can check in review. When they pull against each other, pick what works and is easiest to undo.
+Each principle from [PRINCIPLES.md](https://github.com/junglestyle/.github/blob/main/PRINCIPLES.md) turned into rules you can check in review, arranged by where a reviewer looks. When they pull against each other, pick what works and is easiest to undo.
 
-Each repo keeps this file unchanged as `docs/org-standards.md`. It lists the topics it also follows, such as `python`, in `.org-standards` at its root, and keeps each topic's file here unchanged as `docs/org-standards-<topic>.md`. Every copy is headed by the commit it came from. The repo puts its own rules and examples in `docs/standards.md`; where that differs from a copy, the repo's file wins and names the rule it overrides. The repo's checks fail if a copy was edited by hand, this directory has moved on, or a copy's topic isn't listed; resyncing is one command.
+Each repo keeps this file unchanged as `docs/org-standards.md`. It lists the topics it also follows, such as `python`, in `.org-standards` at its root, and keeps each topic's file here unchanged as `docs/org-standards-<topic>.md`. Every copy is headed by the commit it came from. The repo puts its own rules and examples in `docs/standards.md`, under the heading here they belong to, or under one of its own when none fits; where that differs from a copy, the repo's file wins and names the rule it overrides. Where the repo doesn't follow a copy yet, its `docs/standards.md` says so under Known deviations, as debt to pay down. The repo's checks fail if a copy was edited by hand, this directory has moved on, or a copy's topic isn't listed; resyncing is one command.
 
-## Jungle Style
-
-Use what's already racked.
+## Dependencies
 
 - Use the stdlib first, then what's already in the stack, then the OS, the database, and the init system. A new dependency comes last and gets a one-line reason in the commit.
 - Lean on the database's transactions, the OS's process model, and the supervisor's restarts before writing your own.
+- A new language, datastore, framework, or runtime gets an ADR saying what it does that the current stack can't.
 
-## DRY
-
-One fact, one place. DRY is about knowledge, not text.
-
-- A rule has one executable implementation. The docs still describe the behavior a user can observe (a default, a state name, an env var), so a reader never has to open the code to learn what the project does. They just don't carry a second copy of the logic.
-- Two blocks that look alike but would change for different reasons stay separate. Duplication is cheaper than the wrong abstraction.
-- Extract on the third real use, not the second similar-looking one. A critical invariant is the exception: two implementations of it are already one too many.
-
-## YAGNI
-
-Build the current milestone, not the imagined product.
+## Structure
 
 - No plugin systems, factories, registries, base classes, config frameworks, or extension points without two real cases that need them today.
-- No option, flag, or parameter that nothing sets.
-- A deferred requirement gets a line in the spec or `docs/ROADMAP.md`, not a stub in code.
-
-## Zen
-
-From the Zen of Python, the parts that bite:
-
-- Explicit over implicit: no import-time side effects, no hidden globals, no magic defaults that differ by environment.
+- One code path that the CLI, API, and anything else share.
+- A rule has one executable implementation.
+- Two blocks that look alike but would change for different reasons stay separate. Duplication is cheaper than the wrong abstraction.
+- Extract on the third real use, not the second similar-looking one. A critical invariant is the exception: two implementations of it are already one too many.
+- Layers talk through explicit interfaces (an API, a schema, a file format) and don't know each other's internals. The repo's standards name its layers and what each one mustn't know.
 - Flat over nested: early returns, shallow control flow, one module per concept.
-- Errors never pass silently: catch only what you can handle, and say what you did with it.
-- One obvious way: one code path that the CLI, API, and anything else share.
+- No import-time side effects and no hidden globals.
+- Delete code that nothing calls. Git keeps it.
+- Before removing something you didn't write, find out why it's there. The commit says what it was for.
+- Leave each file you touch a little cleaner, within the change's scope.
 
-## Wabi sabi
+## Errors and recovery
 
-Accept imperfection that's honest about itself.
-
-- Plain, finished, and slightly rough beats polished and unfinished. Ship the small thing that works.
-- Be honest about sharp edges. A known limit goes in the docs or one comment; a workaround is fine when it's small and says what it works around.
-- Don't gold-plate output, logging, or UI. Good enough to read is good enough.
-
-## Wu wei
-
-Work with the grain. Don't force it.
-
+- Catch only what you can handle, and say what you did with it. Errors never pass silently.
+- An impossible state raises. It isn't logged and continued.
 - Prefer state the system converges to (expired leases requeue, stale locks clear) over steps someone must remember.
-- Minimize recurring operational work, and make unavoidable maintenance explicit. A feature that quietly creates chores for its owner is a bug; so is elaborate automation to avoid an occasional manual step.
 
-## Pragmatic Programmer
+## Config
 
-- Tracer bullets: get a thin slice working end to end before widening any layer.
-- Crash early: an impossible state raises. It isn't logged and continued.
-- Fix broken windows: leave each file you touch a little cleaner, within the change's scope.
-- Reversible decisions: prefer the choice that's easy to undo, and record the ones that aren't as ADRs in `docs/stack.md`.
-- Orthogonality: layers talk through explicit interfaces (an API, a schema, a file format) and don't know each other's internals.
+- No option, flag, or parameter that nothing sets.
+- No magic default that differs by environment.
+
+## Comments and names
+
+- Names say what. Comments say why.
+- Keep a comment only if a maintainer would lose a fact that the code, types, and tests don't already state. No comments that restate the code, and no commented-out code.
+- The facts worth a comment are constraints the code can't show: concurrency and lifecycle rules, security boundaries, protocol quirks, and the tradeoff behind a non-obvious choice.
+- A known limit goes in the docs or one comment. A workaround is fine when it's small and says what it works around.
+- Project names are dumb and Linuxy: short, lowercase, nothing producty.
 
 ## Testing
 
@@ -71,19 +55,20 @@ Few, focused tests of consequential behavior, at boundaries that stay put.
 
 ## Running it
 
-- One command runs local checks and CI. Installing takes as few maintained scripts as the job needs. Setup steps don't get scattered across docs.
-- The README says what the project is and how to run it, in that order.
+- `make check` runs every check CI runs, offline. The one exception is `make standards`, which checks the org copies against this directory and needs the network; CI runs it as its own job. `make sync-standards` resyncs the copies, and following another topic means adding it to `.org-standards` and running it.
+- Installing takes as few maintained scripts as the job needs. Setup steps don't get scattered across docs.
 
 ## Privacy
 
-- Never commit hostnames, tokens, personal context, or deployment config. Use `.env.example` for config shape. In docs, name roles, not machines: "the NAS" or "a GPU host".
+- Never commit hostnames, tokens, personal context, or deployment config. In docs, name roles, not machines: "the NAS" or "a GPU host".
+- Commit the shape of config, never its values. `.env.example` holds it unless the repo's standards name another place.
 
-## Comments and names
+## Docs
 
-- Names say what. Comments say why.
-- Keep a comment only if a maintainer would lose a fact that the code, types, and tests don't already state. No comments that restate the code, and no commented-out code.
-- The facts worth a comment are constraints the code can't show: concurrency and lifecycle rules, security boundaries, protocol quirks, and the tradeoff behind a non-obvious choice.
-- Project names are dumb and Linuxy: short, lowercase, nothing producty.
+- The README says what the project is and how to run it, in that order.
+- Docs describe the behavior a user can observe (a default, a state name, an env var), so a reader never has to open the code to learn what the project does. They don't carry a second copy of the logic.
+- A deferred requirement gets a line in the spec or `docs/ROADMAP.md`, not a stub in code.
+- A decision that's hard to undo gets an ADR in `docs/stack.md`.
 
 ## Prose
 
