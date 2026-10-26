@@ -157,7 +157,19 @@ def test_kinds_drop_ins_add_kinds_and_never_override(tmp_path: Path) -> None:
     with pytest.raises(SystemExit, match="already configured"):
         worker.load_config(tmp_path / "worker.toml")
 
+    # No kinds is a worker waiting for its drop-ins, not an error, and it takes nothing.
+    (tmp_path / "kinds.d" / "c.toml").unlink()
+    (tmp_path / "worker.toml").write_text('name = "w"\n')
+    (tmp_path / "kinds.d" / "b.toml").unlink()
+    assert worker.load_config(tmp_path / "worker.toml").kinds == {}
+
     # A broken drop-in is named, so the journal says which file to fix.
     (tmp_path / "kinds.d" / "c.toml").write_text("[kinds.c\n")
     with pytest.raises(SystemExit, match=r"c\.toml"):
         worker.load_config(tmp_path / "worker.toml")
+
+
+def test_worker_without_kinds_takes_nothing(client: Client) -> None:
+    client.enqueue({"kind": "a"})
+    assert not run_once(config(["cpu"]), client, wait=0)
+    assert [j["state"] for j in client.jobs(["queued"], 10)] == ["queued"]
