@@ -1,8 +1,9 @@
 # Coding standards
 
-Corral follows the [org standards](org-standards.md), an unchanged copy of
-[junglestyle's](https://github.com/junglestyle/.github/blob/main/code-standards/README.md). This file adds corral's
-own rules and examples. Where it differs from an org rule, it says so, and it wins.
+Corral follows the [org standards](org-standards.md) and the org's [Python standards](org-standards-python.md),
+unchanged copies of [junglestyle's](https://github.com/junglestyle/.github/tree/main/code-standards). `.org-standards`
+lists the topics it copies beyond the general one. This file adds corral's own rules and examples. Where it differs
+from an org rule, it says so, and it wins.
 
 ## Jungle Style
 
@@ -31,11 +32,12 @@ own rules and examples. Where it differs from an org rule, it says so, and it wi
 
 ## Running it
 
-- `make check` runs everything CI runs except the org standards diff. There's no install script: install and
+- `make check` runs everything CI runs except the org standards check. There's no install script: install and
   deployment steps live in [running.md](running.md) and `examples/`.
-- `make standards` diffs [org-standards.md](org-standards.md) against the org's current file, so a hand edit or a
-  stale copy fails. It needs the network, so it isn't part of `make check`; CI runs it as its own job.
-  `make sync-standards` refreshes the copy.
+- `make standards` checks [org-standards.md](org-standards.md) and each topic's copy against the org's current
+  files, so a hand edit, a stale copy, or a copy whose topic isn't in `.org-standards` fails. It needs the network,
+  so it isn't part of `make check`; CI runs it as its own job. `make sync-standards` refreshes the copies; to follow
+  another topic, add it to `.org-standards` and run it.
 
 ## Privacy
 
@@ -45,3 +47,13 @@ own rules and examples. Where it differs from an org rule, it says so, and it wi
 
 - Real consumers appear only as examples. Corral is a general tool, and the docs assume no single owner.
 - "X, not Y" is fine where it prevents a real confusion, such as blocked versus paused.
+
+## Known deviations
+
+Where Corral doesn't follow the [Python standards](org-standards-python.md) yet. These are debt to pay down, not
+overrides: each one should go.
+
+- Logging: `corral.cli` configures its own timestamps (`%(asctime)s`). python.md leaves timestamps to journald or
+  Docker.
+- Typing: jobs travel as `dict[str, Any]` from the HTTP client through the worker (`client.py`, `worker.py`), not
+  as a typed record parsed at the edge.

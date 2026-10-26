@@ -1,9 +1,9 @@
-<!-- junglestyle/.github code-standards/README.md at 360cf34cc3e4729398ad451612acf35caf8634d0. Change it there, then run make sync-standards. -->
+<!-- junglestyle/.github code-standards/README.md at 02947e75f593e165c491e947898134f05cca5421. Change it there, then run make sync-standards. -->
 # Standards
 
 Each principle from [PRINCIPLES.md](https://github.com/junglestyle/.github/blob/main/PRINCIPLES.md) turned into rules you can check in review. When they pull against each other, pick what works and is easiest to undo.
 
-Each repo keeps this file unchanged as `docs/org-standards.md`, headed by the commit it came from, and puts its own rules and examples in `docs/standards.md`. Where the two differ, the repo's file wins and names the rule it overrides. The repo's checks fail if the copy was edited by hand or this file has moved on; resyncing is one command.
+Each repo keeps this file unchanged as `docs/org-standards.md`. It lists the topics it also follows, such as `python`, in `.org-standards` at its root, and keeps each topic's file here unchanged as `docs/org-standards-<topic>.md`. Every copy is headed by the commit it came from. The repo puts its own rules and examples in `docs/standards.md`; where that differs from a copy, the repo's file wins and names the rule it overrides. The repo's checks fail if a copy was edited by hand, this directory has moved on, or a copy's topic isn't listed; resyncing is one command.
 
 ## Jungle Style
 
