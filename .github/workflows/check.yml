@@ -11,3 +11,5 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - run: uv sync --frozen
       - run: make check
+  standards:
+    uses: junglestyle/.github/.github/workflows/standards-check.yml@main

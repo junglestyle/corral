@@ -31,10 +31,11 @@ examples. Where it differs from an org rule, it says so, and it wins.
 
 ## Running it
 
-- `make check` runs everything CI runs. There's no install script: install and deployment steps live in
-  [running.md](running.md) and `examples/`.
-- `make check` also diffs [org-standards.md](org-standards.md) against the org's current file, so a hand edit or a
-  stale copy fails. `make sync-standards` refreshes it.
+- `make check` runs everything CI runs except the org standards diff. There's no install script: install and
+  deployment steps live in [running.md](running.md) and `examples/`.
+- `make standards` diffs [org-standards.md](org-standards.md) against the org's current file, so a hand edit or a
+  stale copy fails. It needs the network, so it isn't part of `make check`; CI runs it as its own job.
+  `make sync-standards` refreshes the copy.
 
 ## Privacy
 
