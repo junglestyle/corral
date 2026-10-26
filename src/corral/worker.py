@@ -56,10 +56,6 @@ def load_config(path: Path) -> Config:
             if name in kinds:
                 raise SystemExit(f"{drop_in}: kind {name} is already configured")
             kinds[name] = kind
-    if not kinds:
-        raise SystemExit(
-            f"{path}: no [kinds] configured here or in kinds.d/, so this worker could never run anything"
-        )
     return Config(name=raw["name"], offers=raw.get("offers", []), kinds=kinds, ignore=raw.get("ignore", []))
 
 
@@ -88,6 +84,9 @@ def run(config: Config, client: Client) -> None:
     if "gpu" in config.offers:
         foreign_gpu_procs(config.ignore)  # Fail at startup, not on the first lease, if nvidia-smi is missing.
     log.info("worker %s offering %s, kinds %s", config.name, config.offers, sorted(config.kinds))
+    if not config.kinds:
+        # Not an error: projects add their kinds.d/ drop-ins to a worker that's already running.
+        log.warning("no kinds configured, so this worker takes nothing until some are added and it restarts")
     while True:
         try:
             run_once(config, client)

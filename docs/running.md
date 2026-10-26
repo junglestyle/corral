@@ -53,19 +53,41 @@ The config names the worker, the capability labels it offers, and the kinds it c
 | `kinds.<kind>.timeout` | Optional, e.g. `30m`. A job that runs longer is killed and counts as a failed attempt. |
 
 Kinds can also go in `kinds.d/*.toml` next to the config, in the same `[kinds.<kind>]` form, so each project that
-runs on a worker installs its own file. A kind configured twice is an error. The worker reads its config at start,
+runs on a worker installs its own file. A kind configured twice is an error. A worker with no kinds yet starts and
+takes nothing, so set up workers before the projects that add kinds to them. The worker reads its config at start,
 so restart it after changing either.
 
-Run it as a systemd user unit, as in
-[`examples/corral-worker.service`](../examples/corral-worker.service), with `CORRAL_URL` and `CORRAL_TOKEN` in
-the unit's `EnvironmentFile`. systemd restarts the worker if it dies, and stopping the unit stops its job too, so
-nothing keeps running under a lease the server has given away. Run `loginctl enable-linger` so the worker
-starts at boot without a login.
+Start the server first; a worker retries until it answers.
 
-On a host where user units don't survive an upgrade, such as a TrueNAS NAS, run
+### As a systemd user unit
+
+systemd restarts the worker if it dies, and stopping the unit stops its job too, so nothing keeps running under a
+lease the server has given away.
+
+1. `uv tool install git+https://github.com/junglestyle/corral` puts `corral` in `~/.local/bin`.
+2. Write `~/.config/corral/env` with `CORRAL_URL` and `CORRAL_TOKEN`, mode 600.
+3. Write `~/.config/corral/worker.toml` with at least `name` and `offers`.
+4. Copy [`examples/corral-worker.service`](../examples/corral-worker.service) to `~/.config/systemd/user/`, then
+   `systemctl --user daemon-reload && systemctl --user enable --now corral-worker`.
+5. `loginctl enable-linger` so it starts at boot without a login.
+
+Logs: `journalctl --user -u corral-worker`. Update with `uv tool upgrade corral`, then restart the unit.
+
+### As a root system service
+
+On a host where user units and changes to `/etc` don't survive an upgrade, such as a TrueNAS NAS, run
 [`examples/system-worker.sh`](../examples/system-worker.sh) at boot instead. It installs corral under one directory
-on a data pool and starts the worker as a root system service, so its jobs can use Docker. The env file there can
-be the server's too.
+on a data pool and starts the worker as a root system service, so its jobs can use Docker.
+
+1. Make the directory, owned by root, mode 700.
+2. Write `DIR/env` with `CORRAL_URL` and `CORRAL_TOKEN`, mode 600. On the server's host this can be the server's
+   env file.
+3. Write `DIR/worker.toml` with at least `name` and `offers`.
+4. Run `sudo sh examples/system-worker.sh DIR` from a clone.
+5. Run it at boot: on TrueNAS, add the same command as a post-init script under System > Advanced >
+   Init/Shutdown Scripts.
+
+Logs: `journalctl -u corral-worker`.
 
 Workers run on the host, not in a container (see [ADR-005](stack.md#adr-005-server-in-a-container-workers-on-the-host)).
 
