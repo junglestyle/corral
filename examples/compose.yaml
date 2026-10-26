@@ -1,10 +1,17 @@
+# The server in Docker. Usage and variables: docs/running.md#server.
+name: corral
+
 services:
   corral:
     build: ..
+    image: corral
+    container_name: corral-server
     restart: unless-stopped
+    # Host networking, so the server binds exactly CORRAL_HOST and nothing else. If that address isn't up yet at
+    # boot (a VPN interface, say), the server exits and docker starts it again until it is.
+    network_mode: host
     environment:
       CORRAL_TOKEN: ${CORRAL_TOKEN:?set CORRAL_TOKEN}
-    ports:
-      - "8700:8700"
+    command: ["--host", "${CORRAL_HOST:?set CORRAL_HOST}"]
     volumes:
-      - ./data:/data
+      - ${CORRAL_DATA:?set CORRAL_DATA}:/data

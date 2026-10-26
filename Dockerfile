@@ -3,5 +3,6 @@ WORKDIR /app
 COPY pyproject.toml uv.lock README.md ./
 COPY src ./src
 RUN uv sync --frozen --no-dev
-EXPOSE 8700
-CMD ["uv", "run", "--no-sync", "corral", "server", "--db", "/data/corral.sqlite", "--host", "0.0.0.0"]
+# The venv's binary, not `uv run`, so the server is PID 1 and gets docker's SIGTERM.
+ENTRYPOINT ["/app/.venv/bin/corral", "server", "--db", "/data/corral.sqlite"]
+CMD ["--host", "0.0.0.0"]
