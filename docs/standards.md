@@ -31,7 +31,8 @@ an org rule, it says so, and it wins.
 ## Docs
 
 - The [spec](SPEC.md) is where the docs describe what a user can observe. It doesn't carry a second copy of the logic.
-- A deferred requirement gets a line in the [spec](SPEC.md)'s milestones.
+- A deferred requirement stays in the [spec](SPEC.md) and gets a later slice in the roadmap, which for now is the
+  spec's [milestones](SPEC.md#milestones) (see Known deviations).
 
 ## Prose
 
@@ -56,3 +57,4 @@ Where Corral doesn't follow the org standards yet. These are debt to pay down, n
   show how to call it.
 - Shell: `examples/system-worker.sh` pipes uv's installer into `sh` and installs corral from `main`, unpinned.
 - Shell: `make check` doesn't run shellcheck.
+- Docs: the build order is the [spec](SPEC.md)'s [milestones](SPEC.md#milestones), not slices in a `docs/ROADMAP.md`.
