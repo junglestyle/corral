@@ -1,9 +1,10 @@
 # Coding standards
 
-Corral follows the [org standards](org-standards.md) and the org's [Python standards](org-standards-python.md),
+Corral follows the [org standards](org-standards.md) and the org's standards for [Python](org-standards-python.md),
+[SQL](org-standards-sql.md), [containers](org-standards-containers.md) and [shell scripts](org-standards-shell.md),
 unchanged copies of [junglestyle's](https://github.com/junglestyle/.github/tree/main/code-standards). `.org-standards`
-lists the topics it copies beyond the general one. This file adds corral's own rules and examples. Where it differs
-from an org rule, it says so, and it wins.
+lists the topics it copies beyond the general one. This file adds corral's own rules and examples. Where it differs from
+an org rule, it says so, and it wins.
 
 ## Dependencies
 
@@ -46,3 +47,12 @@ Where Corral doesn't follow the org standards yet. These are debt to pay down, n
 - Typing: jobs travel as `dict[str, Any]` from the HTTP client through the worker (`client.py`, `worker.py`), not
   as a typed record parsed at the edge.
 - Dependencies: FastAPI and uvicorn have no ADR in [stack.md](stack.md), only a row in its table.
+- SQL: `jobs.state` holds a closed set of names with no `CHECK`, and they're literals, not a `StrEnum`.
+- Containers: the image gets uv from `ghcr.io/astral-sh/uv:python3.12-bookworm-slim`, whose tag doesn't pin uv's
+  version.
+- Containers: the image has no `USER`, so the server runs as root.
+- Containers: `examples/compose.yaml` sets no `logging:`.
+- Shell: `examples/system-worker.sh` is `sh` with `set -eu`, not bash with `set -euo pipefail`, and its header doesn't
+  show how to call it.
+- Shell: `examples/system-worker.sh` pipes uv's installer into `sh` and installs corral from `main`, unpinned.
+- Shell: `make check` doesn't run shellcheck.
