@@ -10,11 +10,24 @@ Everything talks to the server with two environment variables:
 ## Server
 
 ```sh
-corral server --db /data/corral.sqlite --host 0.0.0.0 --port 8700 --aging 1h
+corral server --db /data/corral.sqlite --host 0.0.0.0 --port 8700 --config /data/server.toml
 ```
 
-`--aging` is how much waiting is worth one priority point (see [ordering](SPEC.md#ordering-and-aging)). The
-SQLite file is the whole state; back it up like any other file, or don't, since losing it loses only the queue.
+The SQLite file is the whole state; back it up like any other file, or don't, since losing it loses only the queue
+and any events not yet delivered.
+
+`--config` is optional, and every key in it is too, so an empty file runs on the defaults. See
+[`examples/server.toml`](../examples/server.toml).
+
+| Key | Meaning |
+| --- | --- |
+| `aging` | Waiting worth one priority point (see [ordering](SPEC.md#ordering-and-aging)). Default `1h`. |
+| `block_alert_after` | How long foreign GPU use may hold up GPU jobs before `worker.blocked` (see [foreign GPU use](SPEC.md#foreign-gpu-use)). Default `15m`. |
+| `window` | Time a chunk should take, for [chunking hints](SPEC.md#chunking-hints). Default `10m`. |
+| `kinds.<kind>.window` | The same for one kind |
+| `webhooks` | List of `{url, events, kinds}`. `events` and `kinds` are optional filters (see [completion](SPEC.md#completion)). |
+
+The server reads it at start, so restart it after a change.
 
 Run it in Docker with [`examples/compose.yaml`](../examples/compose.yaml), which builds the repo's `Dockerfile`:
 
@@ -22,7 +35,8 @@ Run it in Docker with [`examples/compose.yaml`](../examples/compose.yaml), which
 docker compose --env-file /path/to/env -f examples/compose.yaml up -d --build
 ```
 
-The env file sets three variables, and a worker on the same host can share it for `CORRAL_URL` and
+The compose file reads `server.toml` from `CORRAL_DATA`, so put one there, even an empty one. The env file sets
+three variables, and a worker on the same host can share it for `CORRAL_URL` and
 `CORRAL_TOKEN`:
 
 | Variable | Meaning |

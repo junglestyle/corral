@@ -13,8 +13,9 @@ import uvicorn
 
 from corral.client import Client
 from corral.duration import parse_duration
-from corral.queue import ALL, DEFAULT_AGING_SECONDS, Queue
+from corral.queue import ALL, Queue
 from corral.server import create_app
+from corral.settings import Settings, load_settings
 from corral.worker import load_config, run
 
 
@@ -26,9 +27,7 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--db", default="corral.sqlite", help="SQLite file (default: %(default)s)")
     p.add_argument("--host", default="127.0.0.1", help="address to bind (default: %(default)s)")
     p.add_argument("--port", type=int, default=8700, help="(default: %(default)s)")
-    p.add_argument(
-        "--aging", type=parse_duration, default=DEFAULT_AGING_SECONDS, help="wait worth one priority point"
-    )
+    p.add_argument("--config", type=Path, help="server TOML config: aging, webhooks, windows (default: none)")
 
     p = sub.add_parser("worker", help="run a worker")
     p.add_argument("config", type=Path, help="worker TOML config")
@@ -62,7 +61,7 @@ def main(argv: list[str] | None = None) -> None:
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
     if args.command == "server":
-        serve(args.db, args.host, args.port, args.aging)
+        serve(args.db, args.host, args.port, load_settings(args.config) if args.config else Settings())
         return
     if args.command == "worker":
         run(load_config(args.config), Client.from_env())
@@ -92,11 +91,11 @@ def main(argv: list[str] | None = None) -> None:
         client.cancel(args.job)
 
 
-def serve(db: str, host: str, port: int, aging_seconds: float) -> None:
+def serve(db: str, host: str, port: int, settings: Settings) -> None:
     token = os.environ.get("CORRAL_TOKEN")
     if not token:
         raise SystemExit("set CORRAL_TOKEN")
-    uvicorn.run(create_app(Queue(db, aging_seconds), token), host=host, port=port)
+    uvicorn.run(create_app(Queue(db, settings), token), host=host, port=port)
 
 
 def show(workers: list[dict[str, Any]], jobs: list[dict[str, Any]]) -> None:

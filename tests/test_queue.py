@@ -1,36 +1,11 @@
+import sqlite3
 from pathlib import Path
-from typing import Any
 
 import pytest
+from conftest import Clock, add, lease
 
+import corral
 from corral.queue import ALL, LEASE_SECONDS, Conflict, JobSpec, Queue
-
-
-class Clock:
-    def __init__(self) -> None:
-        self.t = 1_000_000.0
-
-    def __call__(self) -> float:
-        return self.t
-
-
-@pytest.fixture
-def clock() -> Clock:
-    return Clock()
-
-
-@pytest.fixture
-def q(tmp_path: Path, clock: Clock) -> Queue:
-    return Queue(str(tmp_path / "q.sqlite"), aging_seconds=3600, clock=clock)
-
-
-def add(q: Queue, kind: str = "k", **kw: object) -> int:
-    job, _ = q.enqueue(JobSpec.model_validate({"kind": kind, **kw}))
-    return int(job["id"])
-
-
-def lease(q: Queue, worker: str = "w", offers: tuple[str, ...] = (), kinds: tuple[str, ...] = ("k",)) -> Any:
-    return q.lease(worker, list(offers), list(kinds), [])
 
 
 def test_priority_then_aging_then_age(q: Queue, clock: Clock) -> None:
@@ -193,3 +168,16 @@ def test_restarted_worker_frees_its_old_job(q: Queue) -> None:
     nxt = lease(q, kinds=("other",))
     assert nxt["kind"] == "other"
     assert q.get(job)["state"] == "queued"
+
+
+def test_a_database_from_before_migrations_upgrades_in_place(tmp_path: Path, clock: Clock) -> None:
+    path = tmp_path / "old.sqlite"
+    db = sqlite3.connect(path)
+    db.executescript((Path(corral.__file__).parent / "schema" / "001_initial.sql").read_text())
+    db.execute("INSERT INTO workers VALUES ('w', '[]', '[\"k\"]', '[]', 0)")
+    db.commit()
+    db.close()
+    q = Queue(str(path), clock=clock)
+    add(q)
+    assert lease(q)["kind"] == "k"
+    assert Queue(str(path), clock=clock).workers()[0]["name"] == "w"

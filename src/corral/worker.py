@@ -117,6 +117,8 @@ def run_job(config: Config, client: Client, job: dict[str, Any]) -> None:
             "CORRAL_ARGS": json.dumps(job["args"]),
             "CORRAL_RESULT": str(result_path),
         }
+        if job.get("suggested_items") is not None:  # An older server sends none.
+            env["CORRAL_SUGGESTED_ITEMS"] = str(job["suggested_items"])
         # Its own session, so we can find its GPU processes and kill everything it started.
         proc = subprocess.Popen(kind.argv, env=env, start_new_session=True)
         exit_code = _supervise(config, client, job, kind, proc)

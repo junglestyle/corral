@@ -1,0 +1,18 @@
+# The server's config. Every key is optional. Keys: docs/running.md#server.
+aging = "1h"
+block_alert_after = "15m"
+window = "10m"
+
+[kinds."hearsay.transcribe"]
+window = "5m"
+
+# GPU block alerts to a phone through an ntfy topic.
+[[webhooks]]
+url = "https://ntfy.sh/your-topic"
+events = ["worker.blocked", "worker.unblocked"]
+
+# Every finished transcription to a service that decides what to enqueue next.
+[[webhooks]]
+url = "http://consumer:8000/corral"
+events = ["job.finished"]
+kinds = ["hearsay.transcribe"]

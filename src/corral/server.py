@@ -3,18 +3,26 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import secrets
 import time
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Annotated, Any
 
+import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from corral.queue import Conflict, JobSpec, NotFound, Queue
+from corral.webhooks import deliver
 
 MAX_WAIT_SECONDS = 30
 POLL_SECONDS = 1.0
+HOUSEKEEPING_SECONDS = 1.0
+
+log = logging.getLogger("corral.server")
 
 
 class Proc(BaseModel):
@@ -49,7 +57,13 @@ def create_app(queue: Queue, token: str) -> FastAPI:
         if not secrets.compare_digest(authorization, f"Bearer {token}"):
             raise HTTPException(401, "bad or missing bearer token")
 
-    app = FastAPI(title="corral", dependencies=[Depends(authorize)])
+    @asynccontextmanager
+    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        task = asyncio.create_task(housekeeping(queue))
+        yield
+        task.cancel()
+
+    app = FastAPI(title="corral", dependencies=[Depends(authorize)], lifespan=lifespan)
 
     @app.exception_handler(NotFound)
     def not_found(_: Request, e: NotFound) -> JSONResponse:
@@ -116,3 +130,15 @@ def create_app(queue: Queue, token: str) -> FastAPI:
         return {"resumed": name}
 
     return app
+
+
+async def housekeeping(queue: Queue) -> None:
+    """Expires leases, raises block alerts and sends events, whether or not any request comes in."""
+    async with httpx.AsyncClient() as http:
+        while True:
+            try:
+                queue.housekeep()
+                await deliver(queue, http)
+            except Exception:
+                log.exception("housekeeping failed, trying again")
+            await asyncio.sleep(HOUSEKEEPING_SECONDS)

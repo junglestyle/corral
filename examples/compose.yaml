@@ -12,6 +12,6 @@ services:
     network_mode: host
     environment:
       CORRAL_TOKEN: ${CORRAL_TOKEN:?set CORRAL_TOKEN}
-    command: ["--host", "${CORRAL_HOST:?set CORRAL_HOST}"]
+    command: ["--host", "${CORRAL_HOST:?set CORRAL_HOST}", "--config", "/data/server.toml"]
     volumes:
       - ${CORRAL_DATA:?set CORRAL_DATA}:/data

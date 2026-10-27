@@ -60,7 +60,7 @@ everything pending, and only one of those waits in the queue.
 
 ### Ordering and aging
 
-`effective = priority + waited_seconds / aging_seconds`, with `aging_seconds` set per server (default 3600). The
+`effective = priority + waited_seconds / aging_seconds`, with `aging_seconds` set in the server config (default 1 h). The
 waiting job with the highest effective priority that a worker can run goes first. Ties go to the oldest.
 
 Each `aging_seconds` of waiting is worth one priority point, and aging is uncapped. With the default, a priority-0
@@ -110,7 +110,8 @@ corral:
 
 - `items`: how many items the job processed. This feeds the chunking hint.
 - `more`: `true` re-enqueues the same job (same kind, args and priority, aging reset) because work remains.
-  This is an ordinary enqueue, so it coalesces with an already-queued job that has the same `key`.
+  This is an ordinary enqueue, so it coalesces with an already-queued job that has the same `key`. The job's `then`
+  still runs after each chunk, as after any success, so later steps see the backlog as it shrinks.
 
 Everything else in the result is passed through to events untouched.
 
@@ -148,13 +149,22 @@ has to resume it.
 A job already running when foreign use appears is left alone; `corral kill` it by hand if it's in the way. Two workloads may then share the GPU, and if one
 runs out of memory, that's what the alert is for.
 
-The server raises a `worker.blocked` event when a worker has been blocked for `block_alert_after` (default 15 min)
-while GPU jobs are waiting, naming the foreign processes. It raises `worker.unblocked` when it clears. These go to
-webhooks like any other event, so an ntfy topic gets a push. A block with nothing waiting stays quiet.
+The server raises a `worker.blocked` event when a worker has had foreign GPU use for `block_alert_after` (default
+15 min) while queued jobs it has the kind for need `gpu`. It raises `worker.unblocked` when the GPU clears, but only
+after a `worker.blocked`. These go to webhooks like any other event, so an ntfy topic gets a push:
+
+```json
+{"id": 1188, "event": "worker.blocked", "worker": "gpu-host", "foreign": [{"pid": 4242, "name": "/usr/bin/python3"}],
+ "since": "...", "waiting": 3}
+{"id": 1191, "event": "worker.unblocked", "worker": "gpu-host"}
+```
+
+A block that holds nothing up stays quiet: nothing waiting, the worker paused or running a job, or the worker not
+seen for a lease's length. One block raises one alert, however long it lasts.
 
 ## Completion
 
-When a job ends, in one transaction, the server records the outcome, enqueues each spec in `then` (success only),
+When a job ends (`succeeded`, `failed` or `cancelled`, not when it's requeued for another attempt), in one transaction, the server records the outcome, enqueues each spec in `then` (success only),
 and queues one event per matching webhook:
 
 ```json
@@ -163,8 +173,11 @@ and queues one event per matching webhook:
  "result": {"items": 7}}
 ```
 
-Webhooks are configured on the server with an optional filter on event and kind. Delivery is at-least-once with retries, so
-receivers dedupe on the event's `id`, which every event carries and every retry of it repeats. A plain ntfy topic works as a receiver.
+Webhooks are configured on the server with an optional filter on event and kind; a kind filter passes only job
+events. Each event is a JSON `POST`, and any 2xx answer takes it. Delivery is at-least-once: a failed delivery is
+retried after 5 s, then twice as long each time up to 10 min, and dropped once the event is a day old. Receivers
+dedupe on the event's `id`, which every event carries and every retry of it repeats. A plain ntfy topic works as a
+receiver.
 
 `then` covers chains whose next step is known up front. Webhooks cover everything else: a service outside corral
 that decides for itself what to enqueue.
@@ -172,7 +185,7 @@ that decides for itself what to enqueue.
 ## Chunking hints
 
 For each kind the server keeps an exponentially weighted average of seconds per item, from the `items` and runtime
-of successful jobs. Each kind has a window in the server config (default 10 min). At lease time:
+of successful jobs, with the newest run weighted 0.3. Runtime is from lease to finish, so startup counts. Each kind has a window in the server config (default 10 min). At lease time:
 
 `CORRAL_SUGGESTED_ITEMS = max(1, floor(window / seconds_per_item))`
 
