@@ -1,6 +1,6 @@
 [project]
 name = "corral"
-version = "0.1.0"
+version = "0.0.0"
 description = "Priority job scheduler for opportunistic local compute"
 readme = "README.md"
 license = "MIT"
