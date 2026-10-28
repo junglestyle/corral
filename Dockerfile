@@ -1,4 +1,4 @@
-FROM python:3.12-slim-trixie
+FROM python:3.15-slim-trixie
 COPY --from=ghcr.io/astral-sh/uv:0.11.32 /uv /uvx /bin/
 # The image's Python, never one uv downloads.
 ENV UV_PYTHON_DOWNLOADS=never
