@@ -2,7 +2,7 @@
 
 | Layer | Choice |
 | --- | --- |
-| Language | Python 3.12 |
+| Language | Python 3.15 |
 | Server | FastAPI, uvicorn |
 | State | SQLite (WAL) |
 | Worker | One process per machine, subprocess with `shell=False` |

@@ -13,7 +13,7 @@ DIR="${1:?usage: system-worker.sh DIR}"
 export UV_INSTALL_DIR="$DIR/bin" UV_TOOL_BIN_DIR="$DIR/bin" UV_TOOL_DIR="$DIR/tools" \
     UV_PYTHON_INSTALL_DIR="$DIR/python" UV_CACHE_DIR="$DIR/cache" UV_NO_MODIFY_PATH=1
 [ -x "$DIR/bin/uv" ] || curl -LsSf https://astral.sh/uv/install.sh | sh
-[ -x "$DIR/bin/corral" ] || "$DIR/bin/uv" tool install --python 3.12 git+https://github.com/junglestyle/corral
+[ -x "$DIR/bin/corral" ] || "$DIR/bin/uv" tool install --python 3.15 git+https://github.com/junglestyle/corral
 
 # A transient unit, so nothing is written to /etc. Stopping it also stops the job it's running.
 systemctl stop corral-worker 2>/dev/null || true
