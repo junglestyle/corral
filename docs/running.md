@@ -25,7 +25,7 @@ and any events not yet delivered.
 | `block_alert_after` | How long foreign GPU use may hold up GPU jobs before `worker.blocked` (see [foreign GPU use](SPEC.md#foreign-gpu-use)). Default `15m`. |
 | `window` | Time a chunk should take, for [chunking hints](SPEC.md#chunking-hints). Default `10m`. |
 | `kinds.<kind>.window` | The same for one kind |
-| `webhooks` | List of `{url, events, kinds}`. `events` and `kinds` are optional filters (see [completion](SPEC.md#completion)). |
+| `webhooks` | List of `{url, events, kinds, states}`. `events`, `kinds` and `states` are optional filters (see [completion](SPEC.md#completion)). |
 
 The server reads it at start, so restart it after a change.
 

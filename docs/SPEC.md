@@ -173,8 +173,8 @@ and queues one event per matching webhook:
  "result": {"items": 7}}
 ```
 
-Webhooks are configured on the server with an optional filter on event and kind; a kind filter passes only job
-events. Each event is a JSON `POST`, and any 2xx answer takes it. Delivery is at-least-once: a failed delivery is
+Webhooks are configured on the server with optional filters on event, kind and state; a kind or state filter passes
+only job events. `states = ["failed"]` sends a phone only the jobs that gave up. Each event is a JSON `POST`, and any 2xx answer takes it. Delivery is at-least-once: a failed delivery is
 retried after 5 s, then twice as long each time up to 10 min, and dropped once the event is a day old. Receivers
 dedupe on the event's `id`, which every event carries and every retry of it repeats. A plain ntfy topic works as a
 receiver.
