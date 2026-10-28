@@ -7,13 +7,13 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any
 
 import uvicorn
 
 from corral.client import Client
 from corral.duration import parse_duration
 from corral.queue import ALL, Queue
+from corral.records import Job, JobState, Worker
 from corral.server import create_app
 from corral.settings import Settings, load_settings
 from corral.worker import load_config, run
@@ -41,7 +41,12 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--then", default="[]", help="JSON list of job specs to enqueue on success")
 
     p = sub.add_parser("ls", help="list workers and jobs")
-    p.add_argument("--state", action="append", help="job state to show; repeatable (default: queued, leased)")
+    p.add_argument(
+        "--state",
+        action="append",
+        type=JobState,
+        help="job state to show; repeatable (default: queued, leased)",
+    )
     p.add_argument("--limit", type=int, default=50)
 
     p = sub.add_parser("pause", help="stop a worker taking new jobs")
@@ -78,9 +83,9 @@ def main(argv: list[str] | None = None) -> None:
             "then": json.loads(args.then),
         }
         job, created = client.enqueue(spec)
-        print(job["id"] if created else f"{job['id']} (already queued with key {job['key']})")
+        print(job.id if created else f"{job.id} (already queued with key {job.key})")
     elif args.command == "ls":
-        show(client.workers(), client.jobs(args.state or ["queued", "leased"], args.limit))
+        show(client.workers(), client.jobs(args.state or [JobState.QUEUED, JobState.LEASED], args.limit))
     elif args.command == "pause":
         client.pause(args.worker, args.now, args.duration)
     elif args.command == "resume":
@@ -98,26 +103,24 @@ def serve(db: str, host: str, port: int, settings: Settings) -> None:
     uvicorn.run(create_app(Queue(db, settings), token), host=host, port=port)
 
 
-def show(workers: list[dict[str, Any]], jobs: list[dict[str, Any]]) -> None:
+def show(workers: list[Worker], jobs: list[Job]) -> None:
     rows = [["WORKER", "STATE", "JOB", "OFFERS", "NOTE"]]
     for w in workers:
         note = []
-        if w["paused_until"]:
-            note.append(f"until {w['paused_until']}")
-        if w["foreign"]:
-            note.append("gpu in use by " + ", ".join(f"{p['name']} ({p['pid']})" for p in w["foreign"]))
-        note.append(f"seen {w['last_seen']}")
-        rows.append([w["name"], w["state"], str(w["job"] or ""), ",".join(w["offers"]), "; ".join(note)])
+        if w.paused_until:
+            note.append(f"until {w.paused_until}")
+        if w.foreign:
+            note.append("gpu in use by " + ", ".join(f"{p.name} ({p.pid})" for p in w.foreign))
+        note.append(f"seen {w.last_seen}")
+        rows.append([w.name, w.state, str(w.job or ""), ",".join(w.offers), "; ".join(note)])
     _table(rows)
     print()
     rows = [["JOB", "STATE", "PRI", "KIND", "WORKER", "TRIES", "ENQUEUED"]]
     for j in jobs:
-        state = j["state"] + (" (stopping)" if j["stopping"] else "")
-        worker = j["worker"] if j["state"] == "leased" else ""
-        tries = f"{j['attempts']}/{j['max_attempts']}"
-        rows.append(
-            [str(j["id"]), state, str(j["priority"]), j["kind"], worker or "", tries, j["enqueued_at"]]
-        )
+        state = j.state + (" (stopping)" if j.stopping else "")
+        worker = j.worker if j.state == JobState.LEASED else ""
+        tries = f"{j.attempts}/{j.max_attempts}"
+        rows.append([str(j.id), state, str(j.priority), j.kind, worker or "", tries, j.enqueued_at])
     _table(rows)
 
 

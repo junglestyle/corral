@@ -4,6 +4,7 @@ from typing import Any
 import pytest
 
 from corral.queue import JobSpec, Queue
+from corral.records import Proc
 
 
 class Clock:
@@ -26,7 +27,7 @@ def q(tmp_path: Path, clock: Clock) -> Queue:
 
 def add(q: Queue, kind: str = "k", **kw: object) -> int:
     job, _ = q.enqueue(JobSpec.model_validate({"kind": kind, **kw}))
-    return int(job["id"])
+    return job.id
 
 
 def lease(
@@ -34,6 +35,6 @@ def lease(
     worker: str = "w",
     offers: tuple[str, ...] = (),
     kinds: tuple[str, ...] = ("k",),
-    foreign: tuple[dict[str, Any], ...] = (),
+    foreign: tuple[Proc, ...] = (),
 ) -> Any:
     return q.lease(worker, list(offers), list(kinds), list(foreign))

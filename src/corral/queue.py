@@ -8,13 +8,15 @@ import sqlite3
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+from enum import StrEnum
 from importlib import resources
 from math import floor
 from typing import Any
 
 from pydantic import BaseModel, Field
 
+from corral.records import Job, JobState, Lease, Proc, Worker, WorkerState
 from corral.settings import Event, Settings
 
 ALL = "all"
@@ -26,6 +28,13 @@ RETRY_MAX_SECONDS = 600
 GIVE_UP_SECONDS = 86400
 # What a job.finished event says about the job.
 FINISHED_FIELDS = ("id", "kind", "state", "args", "attempts", "worker", "started_at", "finished_at")
+
+
+class Stop(StrEnum):
+    """Why a running job is being killed: the values of `jobs.stop`, which its CHECK lists too."""
+
+    REQUEUE = "requeue"
+    CANCEL = "cancel"
 
 
 class JobSpec(BaseModel):
@@ -86,34 +95,32 @@ class Queue:
         finally:
             db.close()
 
-    def enqueue(self, spec: JobSpec) -> tuple[dict[str, Any], bool]:
+    def enqueue(self, spec: JobSpec) -> tuple[Job, bool]:
         """Returns the job and whether it was created; an existing queued job with the same key wins."""
         with self._tx() as db:
             job_id, created = self._enqueue(db, spec)
             return _job(self._row(db, job_id)), created
 
-    def get(self, job_id: int) -> dict[str, Any]:
+    def get(self, job_id: int) -> Job:
         with self._tx() as db:
             self._expire(db)
             return _job(self._row(db, job_id))
 
-    def jobs(self, states: list[str], limit: int = 100) -> list[dict[str, Any]]:
+    def jobs(self, states: list[JobState], limit: int = 100) -> list[Job]:
         with self._tx() as db:
             self._expire(db)
             where = f"WHERE state IN ({','.join('?' * len(states))})" if states else ""
             rows = db.execute(f"SELECT * FROM jobs {where} ORDER BY id DESC LIMIT ?", (*states, limit))
             return [_job(r) for r in rows]
 
-    def lease(
-        self, worker: str, offers: list[str], kinds: list[str], foreign: list[dict[str, Any]]
-    ) -> dict[str, Any] | None:
+    def lease(self, worker: str, offers: list[str], kinds: list[str], foreign: list[Proc]) -> Lease | None:
         now = self.clock()
         with self._tx() as db:
             self._expire(db)
             self._see(db, worker, offers, kinds, foreign)
             # A worker asking for work isn't running anything, so whatever it still holds was lost in a crash.
             for row in db.execute(
-                "SELECT * FROM jobs WHERE state = 'leased' AND worker = ?", (worker,)
+                "SELECT * FROM jobs WHERE state = ? AND worker = ?", (JobState.LEASED, worker)
             ).fetchall():
                 self._settle(db, row, exit_code=None, result=None)
             if self._paused(db, worker):
@@ -123,8 +130,8 @@ class Queue:
             candidates = [
                 r
                 for r in db.execute(
-                    f"SELECT * FROM jobs WHERE state = 'queued' AND kind IN ({','.join('?' * len(kinds))})",
-                    kinds,
+                    f"SELECT * FROM jobs WHERE state = ? AND kind IN ({','.join('?' * len(kinds))})",
+                    (JobState.QUEUED, *kinds),
                 )
                 if set(json.loads(r["needs"])) <= have
             ]
@@ -133,17 +140,18 @@ class Queue:
             best = max(candidates, key=lambda r: (self._effective(r, now), -r["enqueued_at"], -r["id"]))
             lease_id = secrets.token_urlsafe(16)
             db.execute(
-                """UPDATE jobs SET state = 'leased', worker = ?, lease_id = ?, lease_expires = ?,
+                """UPDATE jobs SET state = ?, worker = ?, lease_id = ?, lease_expires = ?,
                    attempts = attempts + 1, started_at = ?, stop = NULL WHERE id = ?""",
-                (worker, lease_id, now + LEASE_SECONDS, now, best["id"]),
+                (JobState.LEASED, worker, lease_id, now + LEASE_SECONDS, now, best["id"]),
             )
-            return _job(self._row(db, best["id"])) | {
-                "lease_id": lease_id,
-                "lease_seconds": LEASE_SECONDS,
-                "suggested_items": self._suggested_items(db, best["kind"]),
-            }
+            return Lease(
+                **vars(_job(self._row(db, best["id"]))),
+                lease_id=lease_id,
+                lease_seconds=LEASE_SECONDS,
+                suggested_items=self._suggested_items(db, best["kind"]),
+            )
 
-    def heartbeat(self, lease_id: str, foreign: list[dict[str, Any]]) -> bool:
+    def heartbeat(self, lease_id: str, foreign: list[Proc]) -> bool:
         """Extends the lease. Returns True when the job should be killed."""
         now = self.clock()
         with self._tx() as db:
@@ -153,32 +161,35 @@ class Queue:
             self._observe(db, row["worker"], foreign)
             return row["stop"] is not None
 
-    def finish(self, lease_id: str, exit_code: int, result: dict[str, Any] | None) -> dict[str, Any]:
+    def finish(self, lease_id: str, exit_code: int, result: dict[str, Any] | None) -> Job:
         with self._tx() as db:
             self._expire(db)
             row = self._leased(db, lease_id)
             self._settle(db, row, exit_code, result)
             return _job(self._row(db, row["id"]))
 
-    def kill(self, job_id: int) -> dict[str, Any]:
+    def kill(self, job_id: int) -> Job:
         with self._tx() as db:
             self._expire(db)
             row = self._row(db, job_id)
-            if row["state"] != "leased":
+            if row["state"] != JobState.LEASED:
                 raise Conflict(f"job {job_id} is {row['state']}, not running")
-            db.execute("UPDATE jobs SET stop = 'requeue' WHERE id = ? AND stop IS NULL", (job_id,))
+            db.execute("UPDATE jobs SET stop = ? WHERE id = ? AND stop IS NULL", (Stop.REQUEUE, job_id))
             return _job(self._row(db, job_id))
 
-    def cancel(self, job_id: int) -> dict[str, Any]:
+    def cancel(self, job_id: int) -> Job:
         now = self.clock()
         with self._tx() as db:
             self._expire(db)
             row = self._row(db, job_id)
-            if row["state"] == "queued":
-                db.execute("UPDATE jobs SET state = 'cancelled', finished_at = ? WHERE id = ?", (now, job_id))
+            if row["state"] == JobState.QUEUED:
+                db.execute(
+                    "UPDATE jobs SET state = ?, finished_at = ? WHERE id = ?",
+                    (JobState.CANCELLED, now, job_id),
+                )
                 self._finished(db, self._row(db, job_id))
-            elif row["state"] == "leased":
-                db.execute("UPDATE jobs SET stop = 'cancel' WHERE id = ?", (job_id,))
+            elif row["state"] == JobState.LEASED:
+                db.execute("UPDATE jobs SET stop = ? WHERE id = ?", (Stop.CANCEL, job_id))
             else:
                 raise Conflict(f"job {job_id} already {row['state']}")
             return _job(self._row(db, job_id))
@@ -189,9 +200,9 @@ class Queue:
             db.execute("INSERT OR REPLACE INTO pauses (name, until) VALUES (?, ?)", (name, until))
             if now:
                 db.execute(
-                    "UPDATE jobs SET stop = 'requeue' WHERE state = 'leased' AND stop IS NULL"
+                    "UPDATE jobs SET stop = ? WHERE state = ? AND stop IS NULL"
                     + ("" if name == ALL else " AND worker = ?"),
-                    () if name == ALL else (name,),
+                    (Stop.REQUEUE, JobState.LEASED) + (() if name == ALL else (name,)),
                 )
 
     def resume(self, name: str) -> None:
@@ -202,35 +213,35 @@ class Queue:
             else:
                 db.execute("DELETE FROM pauses WHERE name = ?", (name,))
 
-    def workers(self) -> list[dict[str, Any]]:
+    def workers(self) -> list[Worker]:
         with self._tx() as db:
             self._expire(db)
             out = []
             for w in db.execute("SELECT * FROM workers ORDER BY name").fetchall():
                 job = db.execute(
-                    "SELECT id FROM jobs WHERE state = 'leased' AND worker = ?", (w["name"],)
+                    "SELECT id FROM jobs WHERE state = ? AND worker = ?", (JobState.LEASED, w["name"])
                 ).fetchone()
-                foreign = json.loads(w["foreign_procs"])
+                foreign = _procs(w["foreign_procs"])
                 pause = self._paused(db, w["name"])
                 if pause:
-                    state = "draining" if job else "paused"
+                    state = WorkerState.DRAINING if job else WorkerState.PAUSED
                 elif job:
-                    state = "running"
+                    state = WorkerState.RUNNING
                 elif foreign:
-                    state = "blocked"
+                    state = WorkerState.BLOCKED
                 else:
-                    state = "idle"
+                    state = WorkerState.IDLE
                 out.append(
-                    {
-                        "name": w["name"],
-                        "state": state,
-                        "job": job["id"] if job else None,
-                        "offers": json.loads(w["offers"]),
-                        "kinds": json.loads(w["kinds"]),
-                        "foreign": foreign,
-                        "paused_until": _iso(pause["until"]) if pause else None,
-                        "last_seen": _iso(w["last_seen"]),
-                    }
+                    Worker(
+                        name=w["name"],
+                        state=state,
+                        job=job["id"] if job else None,
+                        offers=json.loads(w["offers"]),
+                        kinds=json.loads(w["kinds"]),
+                        foreign=foreign,
+                        paused_until=_iso_or_none(pause["until"]) if pause else None,
+                        last_seen=_iso(w["last_seen"]),
+                    )
                 )
             return out
 
@@ -285,14 +296,15 @@ class Queue:
     def _enqueue(self, db: sqlite3.Connection, spec: JobSpec) -> tuple[int, bool]:
         if spec.key is not None:
             hit = db.execute(
-                "SELECT id FROM jobs WHERE state = 'queued' AND key = ? ORDER BY id LIMIT 1", (spec.key,)
+                "SELECT id FROM jobs WHERE state = ? AND key = ? ORDER BY id LIMIT 1",
+                (JobState.QUEUED, spec.key),
             ).fetchone()
             if hit:
                 return int(hit["id"]), False
         cur = db.execute(
             """INSERT INTO jobs
                (kind, needs, priority, args, key, then_specs, max_attempts, state, enqueued_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 spec.kind,
                 json.dumps(spec.needs),
@@ -301,6 +313,7 @@ class Queue:
                 spec.key,
                 json.dumps([t.model_dump() for t in spec.then]),
                 spec.max_attempts,
+                JobState.QUEUED,
                 self.clock(),
             ),
         )
@@ -313,16 +326,16 @@ class Queue:
         """Ends a lease. exit_code None means the lease was lost (expired or orphaned)."""
         now = self.clock()
         attempts = row["attempts"]
-        if row["stop"] == "requeue":
-            state, attempts = "queued", attempts - 1
-        elif row["stop"] == "cancel":
-            state = "cancelled"
+        if row["stop"] == Stop.REQUEUE:
+            state, attempts = JobState.QUEUED, attempts - 1
+        elif row["stop"] == Stop.CANCEL:
+            state = JobState.CANCELLED
         elif exit_code == 0:
-            state = "succeeded"
+            state = JobState.SUCCEEDED
         elif attempts < row["max_attempts"]:
-            state = "queued"
+            state = JobState.QUEUED
         else:
-            state = "failed"
+            state = JobState.FAILED
         db.execute(
             """UPDATE jobs SET state = ?, attempts = ?, lease_id = NULL, lease_expires = NULL, stop = NULL,
                exit_code = ?, result = ?, finished_at = ? WHERE id = ?""",
@@ -331,13 +344,13 @@ class Queue:
                 attempts,
                 exit_code,
                 json.dumps(result) if result is not None else None,
-                None if state == "queued" else now,
+                None if state == JobState.QUEUED else now,
                 row["id"],
             ),
         )
-        if state == "queued":
+        if state == JobState.QUEUED:
             return
-        if state == "succeeded":
+        if state == JobState.SUCCEEDED:
             self._time(db, row["kind"], now - row["started_at"], (result or {}).get("items"))
             if (result or {}).get("more") is True:
                 self._enqueue(db, _spec(row))
@@ -347,8 +360,8 @@ class Queue:
 
     def _finished(self, db: sqlite3.Connection, row: sqlite3.Row) -> None:
         job = _job(row)
-        body = {"job": {k: job[k] for k in FINISHED_FIELDS}, "result": job["result"]}
-        self._emit(db, Event.JOB_FINISHED, body, row["kind"], row["state"])
+        body = {"job": {k: getattr(job, k) for k in FINISHED_FIELDS}, "result": job.result}
+        self._emit(db, Event.JOB_FINISHED, body, job.kind, job.state)
 
     def _time(self, db: sqlite3.Connection, kind: str, seconds: float, items: object) -> None:
         """Folds a successful run into its kind's average seconds per item."""
@@ -391,8 +404,8 @@ class Queue:
     def _expire(self, db: sqlite3.Connection) -> None:
         """Catches up on everything that happens with time: lost leases, timed pauses, block alerts."""
         now = self.clock()
-        leased = "SELECT * FROM jobs WHERE state = 'leased' AND lease_expires < ?"
-        for row in db.execute(leased, (now,)).fetchall():
+        leased = "SELECT * FROM jobs WHERE state = ? AND lease_expires < ?"
+        for row in db.execute(leased, (JobState.LEASED, now)).fetchall():
             self._settle(db, row, exit_code=None, result=None)
         db.execute("DELETE FROM pauses WHERE until IS NOT NULL AND until <= ?", (now,))
         self._alert_blocks(db, now)
@@ -401,15 +414,17 @@ class Queue:
         """Raises worker.blocked for a live, unpaused, idle worker blocked long enough that GPU work waits."""
         blocked = db.execute(
             """SELECT * FROM workers WHERE block_alerted = 0 AND blocked_since <= ? AND last_seen >= ?
-               AND name NOT IN (SELECT worker FROM jobs WHERE state = 'leased')""",
-            (now - self.settings.block_alert_after, now - LEASE_SECONDS),
+               AND name NOT IN (SELECT worker FROM jobs WHERE state = ?)""",
+            (now - self.settings.block_alert_after, now - LEASE_SECONDS, JobState.LEASED),
         ).fetchall()
         for w in blocked:
             if self._paused(db, w["name"]):
                 continue
             kinds = json.loads(w["kinds"])
             marks = ",".join("?" * len(kinds))
-            queued = db.execute(f"SELECT needs FROM jobs WHERE state = 'queued' AND kind IN ({marks})", kinds)
+            queued = db.execute(
+                f"SELECT needs FROM jobs WHERE state = ? AND kind IN ({marks})", (JobState.QUEUED, *kinds)
+            )
             waiting = sum("gpu" in json.loads(r["needs"]) for r in queued)
             if not waiting:
                 continue
@@ -431,7 +446,7 @@ class Queue:
         worker: str,
         offers: list[str],
         kinds: list[str],
-        foreign: list[dict[str, Any]],
+        foreign: list[Proc],
     ) -> None:
         db.execute(
             """INSERT INTO workers (name, offers, kinds, foreign_procs, last_seen) VALUES (?, ?, ?, '[]', ?)
@@ -440,7 +455,7 @@ class Queue:
         )
         self._observe(db, worker, foreign)
 
-    def _observe(self, db: sqlite3.Connection, worker: str, foreign: list[dict[str, Any]]) -> None:
+    def _observe(self, db: sqlite3.Connection, worker: str, foreign: list[Proc]) -> None:
         """Records what else is on the worker's GPU, and says so when a block that was alerted clears."""
         now = self.clock()
         if not foreign:
@@ -454,7 +469,7 @@ class Queue:
                blocked_since = CASE WHEN ? THEN COALESCE(blocked_since, ?) END,
                block_alerted = CASE WHEN ? THEN block_alerted ELSE 0 END
                WHERE name = ?""",
-            (json.dumps(foreign), now, bool(foreign), now, bool(foreign), worker),
+            (json.dumps([asdict(p) for p in foreign]), now, bool(foreign), now, bool(foreign), worker),
         )
 
     def _paused(self, db: sqlite3.Connection, worker: str) -> sqlite3.Row | None:
@@ -475,39 +490,45 @@ class Queue:
 
     def _leased(self, db: sqlite3.Connection, lease_id: str) -> sqlite3.Row:
         row: sqlite3.Row | None = db.execute(
-            "SELECT * FROM jobs WHERE lease_id = ? AND state = 'leased'", (lease_id,)
+            "SELECT * FROM jobs WHERE lease_id = ? AND state = ?", (lease_id, JobState.LEASED)
         ).fetchone()
         if row is None:
             raise Conflict("lease expired or already finished")
         return row
 
 
-def _job(row: sqlite3.Row) -> dict[str, Any]:
-    return {
-        "id": row["id"],
-        "kind": row["kind"],
-        "needs": json.loads(row["needs"]),
-        "priority": row["priority"],
-        "args": json.loads(row["args"]),
-        "key": row["key"],
-        "then": json.loads(row["then_specs"]),
-        "state": row["state"],
-        "attempts": row["attempts"],
-        "max_attempts": row["max_attempts"],
-        "worker": row["worker"],
-        "stopping": row["stop"] is not None,
-        "enqueued_at": _iso(row["enqueued_at"]),
-        "started_at": _iso(row["started_at"]),
-        "finished_at": _iso(row["finished_at"]),
-        "exit_code": row["exit_code"],
-        "result": json.loads(row["result"]) if row["result"] is not None else None,
-    }
+def _job(row: sqlite3.Row) -> Job:
+    return Job(
+        id=row["id"],
+        kind=row["kind"],
+        needs=json.loads(row["needs"]),
+        priority=row["priority"],
+        args=json.loads(row["args"]),
+        key=row["key"],
+        then=json.loads(row["then_specs"]),
+        state=JobState(row["state"]),
+        attempts=row["attempts"],
+        max_attempts=row["max_attempts"],
+        worker=row["worker"],
+        stopping=row["stop"] is not None,
+        enqueued_at=_iso(row["enqueued_at"]),
+        started_at=_iso_or_none(row["started_at"]),
+        finished_at=_iso_or_none(row["finished_at"]),
+        exit_code=row["exit_code"],
+        result=json.loads(row["result"]) if row["result"] is not None else None,
+    )
 
 
-def _iso(ts: float | None) -> str | None:
-    if ts is None:
-        return None
+def _procs(text: str) -> list[Proc]:
+    return [Proc(**p) for p in json.loads(text)]
+
+
+def _iso(ts: float) -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ts))
+
+
+def _iso_or_none(ts: float | None) -> str | None:
+    return None if ts is None else _iso(ts)
 
 
 def _migrate(db: sqlite3.Connection) -> None:

@@ -1,6 +1,7 @@
 import asyncio
 import json
 import time
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,7 @@ from conftest import Clock, add, lease
 from fastapi.testclient import TestClient
 
 from corral.queue import Queue
+from corral.records import Proc
 from corral.server import create_app
 from corral.settings import Event, Settings, Webhook, load_settings
 from corral.webhooks import deliver
@@ -18,7 +20,7 @@ EVERYTHING = Webhook("http://all")
 BLOCKS = Webhook("http://alerts", events=frozenset({"worker.blocked", "worker.unblocked"}))
 TRANSCRIBES = Webhook("http://next-step", kinds=frozenset({"transcribe"}))
 FAILURES = Webhook("http://phone", states=frozenset({"failed"}))
-GPU_HOG = {"pid": 4242, "name": "/usr/bin/python3"}
+GPU_HOG = Proc(4242, "/usr/bin/python3")
 
 
 @pytest.fixture
@@ -37,7 +39,7 @@ def sent(q: Queue) -> list[tuple[str, dict[str, Any]]]:
 
 def test_finished_jobs_reach_the_webhooks_that_want_them(q: Queue) -> None:
     job = add(q, "transcribe", args={"path": "/x"})
-    q.finish(lease(q, kinds=("transcribe",))["lease_id"], 0, {"items": 2, "note": "kept"})
+    q.finish(lease(q, kinds=("transcribe",)).lease_id, 0, {"items": 2, "note": "kept"})
     out = sent(q)
     assert [url for url, _ in out] == ["http://all", "http://next-step"]
     # One event, so both receivers see the same id to dedupe on.
@@ -53,18 +55,18 @@ def test_finished_jobs_reach_the_webhooks_that_want_them(q: Queue) -> None:
 def test_a_state_filter_passes_only_jobs_that_ended_that_way(tmp_path: Path, clock: Clock) -> None:
     q = Queue(str(tmp_path / "q.sqlite"), Settings(webhooks=(FAILURES,)), clock)
     add(q, max_attempts=1)
-    q.finish(lease(q)["lease_id"], 0, None)
+    q.finish(lease(q).lease_id, 0, None)
     add(q, max_attempts=1)
-    q.finish(lease(q)["lease_id"], 1, None)
+    q.finish(lease(q).lease_id, 1, None)
     assert [b["job"]["state"] for _, b in sent(q)] == ["failed"]
     assert not FAILURES.wants(Event.WORKER_BLOCKED, None)
 
 
 def test_only_a_job_ending_is_an_event(q: Queue) -> None:
     add(q, max_attempts=2)
-    q.finish(lease(q)["lease_id"], 1, None)
+    q.finish(lease(q).lease_id, 1, None)
     assert sent(q) == []  # Requeued, not ended.
-    q.finish(lease(q)["lease_id"], 1, None)
+    q.finish(lease(q).lease_id, 1, None)
     cancelled = add(q)
     q.cancel(cancelled)
     assert [b["job"]["state"] for _, b in sent(q)] == ["failed", "cancelled"]
@@ -72,7 +74,7 @@ def test_only_a_job_ending_is_an_event(q: Queue) -> None:
 
 def test_failed_delivery_backs_off_then_gives_up(q: Queue, clock: Clock) -> None:
     add(q, "other")
-    q.finish(lease(q, kinds=("other",))["lease_id"], 0, None)
+    q.finish(lease(q, kinds=("other",)).lease_id, 0, None)
     (d,) = q.due_deliveries()
     assert q.retry(d)
     assert q.due_deliveries() == []
@@ -89,7 +91,7 @@ def test_failed_delivery_backs_off_then_gives_up(q: Queue, clock: Clock) -> None
 
 def test_deliver_posts_and_retries_on_error(q: Queue, clock: Clock) -> None:
     add(q, "other")
-    q.finish(lease(q, kinds=("other",))["lease_id"], 0, None)
+    q.finish(lease(q, kinds=("other",)).lease_id, 0, None)
     posted: list[Any] = []
     status = 500
 
@@ -130,7 +132,7 @@ def test_a_long_block_with_gpu_work_waiting_alerts_once_then_clears(q: Queue, cl
     block(q, clock, 2)
     (alert,) = alerts(q)
     assert alert["event"] == "worker.blocked" and alert["worker"] == "gpu-host"
-    assert alert["foreign"] == [GPU_HOG] and alert["waiting"] == 1
+    assert alert["foreign"] == [asdict(GPU_HOG)] and alert["waiting"] == 1
     block(q, clock, 30)
     assert alerts(q) == []
     lease(q, "gpu-host", offers=("gpu", "cpu"), kinds=("train",))
@@ -187,7 +189,7 @@ def test_settings_file(tmp_path: Path) -> None:
 
 def test_the_server_runs_housekeeping_while_it_serves(q: Queue, clock: Clock) -> None:
     add(q, "other")
-    q.finish(lease(q, kinds=("other",))["lease_id"], 0, None)
+    q.finish(lease(q, kinds=("other",)).lease_id, 0, None)
     with TestClient(create_app(q, "secret")):
         deadline = time.monotonic() + 5
         # Nothing listens at the urls, so each delivery fails and is pushed back.

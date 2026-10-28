@@ -18,6 +18,7 @@ import httpx
 
 from corral.client import Client, LeaseLost
 from corral.duration import parse_duration
+from corral.records import Lease, Proc
 
 HEARTBEAT_SECONDS = 15
 RETRY_SECONDS = 5
@@ -106,45 +107,44 @@ def run_once(config: Config, client: Client, wait: float = 30) -> bool:
     return True
 
 
-def run_job(config: Config, client: Client, job: dict[str, Any]) -> None:
-    kind = config.kinds[job["kind"]]
-    lease_id = job["lease_id"]
-    log.info("job %s (%s) started, attempt %s", job["id"], job["kind"], job["attempts"])
+def run_job(config: Config, client: Client, job: Lease) -> None:
+    kind = config.kinds[job.kind]
+    log.info("job %s (%s) started, attempt %s", job.id, job.kind, job.attempts)
     with tempfile.TemporaryDirectory(prefix="corral-") as tmp:
         result_path = Path(tmp) / "result.json"
         env = os.environ | {
-            "CORRAL_JOB_ID": str(job["id"]),
-            "CORRAL_ARGS": json.dumps(job["args"]),
+            "CORRAL_JOB_ID": str(job.id),
+            "CORRAL_ARGS": json.dumps(job.args),
             "CORRAL_RESULT": str(result_path),
         }
-        if job.get("suggested_items") is not None:  # An older server sends none.
-            env["CORRAL_SUGGESTED_ITEMS"] = str(job["suggested_items"])
+        if job.suggested_items is not None:
+            env["CORRAL_SUGGESTED_ITEMS"] = str(job.suggested_items)
         # Its own session, so we can find its GPU processes and kill everything it started.
         proc = subprocess.Popen(kind.argv, env=env, start_new_session=True)
         exit_code = _supervise(config, client, job, kind, proc)
         if exit_code is None:
             return
-        result = _read_result(result_path, job["id"])
+        result = _read_result(result_path, job.id)
 
-    log.info("job %s exited %s", job["id"], exit_code)
+    log.info("job %s exited %s", job.id, exit_code)
     while True:
         try:
-            client.finish(lease_id, exit_code, result)
+            client.finish(job.lease_id, exit_code, result)
             return
         except LeaseLost:
-            log.warning("job %s: lease lost before finish, outcome dropped", job["id"])
+            log.warning("job %s: lease lost before finish, outcome dropped", job.id)
             return
         except httpx.TransportError as e:
-            log.warning("job %s: finish failed (%s), retrying in %ss", job["id"], e, RETRY_SECONDS)
+            log.warning("job %s: finish failed (%s), retrying in %ss", job.id, e, RETRY_SECONDS)
             time.sleep(RETRY_SECONDS)
 
 
 def _supervise(
-    config: Config, client: Client, job: dict[str, Any], kind: Kind, proc: subprocess.Popen[bytes]
+    config: Config, client: Client, job: Lease, kind: Kind, proc: subprocess.Popen[bytes]
 ) -> int | None:
     """Waits for the job, heartbeating. Returns its exit code, or None when the lease was lost."""
     started = time.monotonic()
-    lease_ok_until = started + job["lease_seconds"]
+    lease_ok_until = started + job.lease_seconds
     while True:
         now = time.monotonic()
         deadline = started + kind.timeout if kind.timeout is not None else None
@@ -155,27 +155,25 @@ def _supervise(
             pass
 
         if deadline is not None and time.monotonic() >= deadline:
-            log.warning("job %s: timed out after %ss, killing", job["id"], kind.timeout)
+            log.warning("job %s: timed out after %ss, killing", job.id, kind.timeout)
             return _kill(proc)
         foreign = foreign_gpu_procs(config.ignore, own_session=proc.pid) if "gpu" in config.offers else []
         try:
-            stop = client.heartbeat(job["lease_id"], foreign)
-            lease_ok_until = time.monotonic() + job["lease_seconds"]
+            stop = client.heartbeat(job.lease_id, foreign)
+            lease_ok_until = time.monotonic() + job.lease_seconds
         except LeaseLost:
-            log.warning("job %s: lease lost, killing", job["id"])
+            log.warning("job %s: lease lost, killing", job.id)
             _kill(proc)
             return None
         except httpx.TransportError as e:
             if time.monotonic() < lease_ok_until:
-                log.warning("job %s: heartbeat failed (%s), will retry", job["id"], e)
+                log.warning("job %s: heartbeat failed (%s), will retry", job.id, e)
                 continue
-            log.warning(
-                "job %s: no heartbeat for a full lease, killing; the server has requeued it", job["id"]
-            )
+            log.warning("job %s: no heartbeat for a full lease, killing; the server has requeued it", job.id)
             _kill(proc)
             return None
         if stop:
-            log.info("job %s: server asked to stop it, killing", job["id"])
+            log.info("job %s: server asked to stop it, killing", job.id)
             return _kill(proc)
 
 
@@ -206,7 +204,7 @@ def _read_result(path: Path, job_id: int) -> dict[str, Any] | None:
     return result
 
 
-def foreign_gpu_procs(ignore: list[str], own_session: int | None = None) -> list[dict[str, Any]]:
+def foreign_gpu_procs(ignore: list[str], own_session: int | None = None) -> list[Proc]:
     """GPU compute processes that are neither ours nor on the ignore list."""
     out = subprocess.run(
         ["nvidia-smi", "--query-compute-apps=pid,process_name", "--format=csv,noheader"],
@@ -224,7 +222,7 @@ def foreign_gpu_procs(ignore: list[str], own_session: int | None = None) -> list
             continue
         if own_session is not None and _session(pid) == own_session:
             continue
-        procs.append({"pid": pid, "name": name})
+        procs.append(Proc(pid, name))
     return procs
 
 

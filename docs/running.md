@@ -35,7 +35,8 @@ Run it in Docker with [`examples/compose.yaml`](../examples/compose.yaml), which
 docker compose --env-file /path/to/env -f examples/compose.yaml up -d --build
 ```
 
-The compose file reads `server.toml` from `CORRAL_DATA`, so put one there, even an empty one. The env file sets
+The compose file reads `server.toml` from `CORRAL_DATA`, so put one there, even an empty one. The server runs as uid
+8700, so give it the directory: `chown -R 8700:8700 "$CORRAL_DATA"`. The env file sets
 three variables, and a worker on the same host can share it for `CORRAL_URL` and
 `CORRAL_TOKEN`:
 
