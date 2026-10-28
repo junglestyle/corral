@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>corral</title>
+<style>
+  :root {
+    --fg: #1A1918; --muted: #6b675f; --bg: #faf9f6; --line: #e4e0d6; --accent: #B7801C;
+    --bad: #b03a2e; --good: #3d7a3a; --warn: #a86a00;
+    color-scheme: light dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --fg: #E8E4DA; --muted: #9c978c; --bg: #161514; --line: #2e2c29; --accent: #E0A83A;
+      --bad: #e0705f; --good: #7bbf6f; --warn: #e0a83a;
+    }
+  }
+  body { margin: 0 auto; max-width: 1100px; padding: 16px; background: var(--bg); color: var(--fg);
+         font: 14px/1.4 system-ui, sans-serif; }
+  header { display: flex; align-items: center; gap: 10px; }
+  header h1 { font-size: 20px; margin: 0; flex: 1; }
+  h2 { font-size: 15px; margin: 28px 0 8px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  h2 .spacer { flex: 1; }
+  h2 label, h2 button { font-weight: normal; }
+  [hidden] { display: none !important; }
+  .wrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line); vertical-align: top;
+           white-space: nowrap; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  td.wide { white-space: normal; word-break: break-word; }
+  .muted { color: var(--muted); }
+  .empty { color: var(--muted); padding: 8px; }
+  .state-failed, .state-blocked { color: var(--bad); }
+  .state-succeeded, .state-running, .state-leased { color: var(--good); }
+  .state-paused, .state-draining, .state-cancelled { color: var(--warn); }
+  button, select, input { font: inherit; color: inherit; background: transparent; border: 1px solid var(--line);
+                          border-radius: 4px; padding: 2px 8px; }
+  button { cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  #error { color: var(--bad); }
+  #login { margin-top: 40px; display: flex; gap: 8px; }
+  #login input { flex: 1; max-width: 360px; }
+  code { font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="28" height="28" aria-hidden="true"><path d="M91.52,84.63 A40,40 0 1 1 91.52,35.37 L78.12,45.84 A23,23 0 1 0 78.12,74.16 Z M67.54,29.93 a3.4,3.4 0 1 0 6.8,0 a3.4,3.4 0 1 0 -6.8,0 Z M37.34,34.44 a3.4,3.4 0 1 0 6.8,0 a3.4,3.4 0 1 0 -6.8,0 Z M24.60,60.00 a3.4,3.4 0 1 0 6.8,0 a3.4,3.4 0 1 0 -6.8,0 Z M37.34,85.56 a3.4,3.4 0 1 0 6.8,0 a3.4,3.4 0 1 0 -6.8,0 Z M67.54,90.07 a3.4,3.4 0 1 0 6.8,0 a3.4,3.4 0 1 0 -6.8,0 Z" fill="currentColor" fill-rule="evenodd"/><circle cx="70.94" cy="29.93" r="3.7" fill="var(--accent)"/></svg>
+  <h1>corral</h1>
+  <span id="error"></span>
+  <span id="updated" class="muted"></span>
+</header>
+
+<form id="login" hidden>
+  <input id="token" type="password" placeholder="CORRAL_TOKEN" autocomplete="current-password" required>
+  <button>Open</button>
+</form>
+
+<main id="main" hidden>
+  <h2>Workers <span class="spacer"></span>
+    <label class="muted">pause for
+      <select id="for">
+        <option value="">until resumed</option>
+        <option value="1800">30m</option>
+        <option value="3600">1h</option>
+        <option value="7200">2h</option>
+        <option value="14400">4h</option>
+        <option value="28800">8h</option>
+      </select>
+    </label>
+    <button data-pause="all">Pause all</button>
+    <button data-resume="all">Resume all</button>
+  </h2>
+  <div class="wrap"><table id="workers"></table></div>
+
+  <h2>Queue</h2>
+  <div class="wrap"><table id="queue"></table></div>
+
+  <h2>History</h2>
+  <div class="wrap"><table id="history"></table></div>
+</main>
+
+<script>
+"use strict";
+// Everything goes through the same HTTP API and token as the CLI. The token stays in this browser.
+const REFRESH_MS = 5000;
+const HISTORY = 50;
+let token = localStorage.getItem("corral-token");
+
+async function api(method, path, body) {
+  const response = await fetch(path, {
+    method,
+    headers: {"Authorization": `Bearer ${token}`, "Content-Type": "application/json"},
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (response.status === 401) {
+    logout();
+    throw new Error("bad token");
+  }
+  if (!response.ok) throw new Error(`${method} ${path}: ${response.status} ${await response.text()}`);
+  return response.json();
+}
+
+function el(tag, text, cls) {
+  const e = document.createElement(tag);
+  if (text !== undefined && text !== null) e.textContent = text;
+  if (cls) e.className = cls;
+  return e;
+}
+
+function when(iso) {
+  if (!iso) return el("span", "");
+  const d = new Date(iso);
+  const today = d.toDateString() === new Date().toDateString();
+  const s = el("span", today ? d.toLocaleTimeString() : d.toLocaleString());
+  s.title = iso;
+  return s;
+}
+
+function took(job) {
+  if (!job.started_at || !job.finished_at) return "";
+  const s = Math.round((new Date(job.finished_at) - new Date(job.started_at)) / 1000);
+  return s < 120 ? `${s}s` : s < 7200 ? `${Math.round(s / 60)}m` : `${(s / 3600).toFixed(1)}h`;
+}
+
+function table(id, heads, rows, empty) {
+  const t = document.getElementById(id);
+  t.replaceChildren();
+  const tr = el("tr");
+  heads.forEach(h => tr.append(el("th", h)));
+  t.append(tr);
+  if (!rows.length) {
+    const r = el("tr"), td = el("td", empty, "empty");
+    td.colSpan = heads.length;
+    r.append(td);
+    t.append(r);
+  }
+  for (const cells of rows) {
+    const r = el("tr");
+    for (const c of cells) {
+      if (c instanceof HTMLTableCellElement) {
+        r.append(c);
+        continue;
+      }
+      const td = el("td");
+      if (c instanceof Node) td.append(c);
+      else td.textContent = c ?? "";
+      r.append(td);
+    }
+    t.append(r);
+  }
+}
+
+function button(text, data) {
+  const b = el("button", text);
+  Object.assign(b.dataset, data);
+  return b;
+}
+
+function workerRow(w) {
+  const note = [];
+  if (w.paused_until) note.push(`until ${new Date(w.paused_until).toLocaleString()}`);
+  if (w.foreign.length) note.push("gpu in use by " + w.foreign.map(p => `${p.name} (${p.pid})`).join(", "));
+  const actions = el("td");
+  const paused = w.state === "paused" || w.state === "draining";
+  actions.append(paused ? button("Resume", {resume: w.name}) : button("Pause", {pause: w.name}));
+  if (w.job !== null) actions.append(" ", button("Pause now", {pause: w.name, now: "1"}));
+  return [w.name, el("span", w.state, `state-${w.state}`), w.job, w.offers.join(","),
+          el("td", note.join("; "), "wide"), when(w.last_seen), actions];
+}
+
+function stateOf(j) {
+  return el("span", j.state + (j.stopping ? " (stopping)" : ""), `state-${j.state}`);
+}
+
+function result(j) {
+  const parts = [];
+  if (j.exit_code !== null) parts.push(`exit ${j.exit_code}`);
+  if (j.result) parts.push(JSON.stringify(j.result));
+  return el("td", parts.join(" "), "wide");
+}
+
+async function refresh() {
+  try {
+    const [workers, queue, history] = await Promise.all([
+      api("GET", "/workers"),
+      api("GET", "/jobs?state=leased&state=queued&limit=200"),
+      api("GET", `/jobs?state=succeeded&state=failed&state=cancelled&limit=${HISTORY}`),
+    ]);
+    table("workers", ["WORKER", "STATE", "JOB", "OFFERS", "NOTE", "SEEN", ""],
+          workers.map(workerRow), "No worker has asked for a job yet.");
+    queue.sort((a, b) => (b.state === "leased") - (a.state === "leased") || b.id - a.id);
+    table("queue", ["JOB", "STATE", "PRI", "KIND", "WORKER", "TRIES", "ENQUEUED", "ARGS"],
+          queue.map(j => [j.id, stateOf(j), j.priority, j.kind, j.state === "leased" ? j.worker : "",
+                          `${j.attempts}/${j.max_attempts}`, when(j.enqueued_at),
+                          el("td", JSON.stringify(j.args), "wide")]),
+          "Nothing queued or running.");
+    table("history", ["JOB", "STATE", "KIND", "WORKER", "TRIES", "FINISHED", "TOOK", "RESULT"],
+          history.map(j => [j.id, stateOf(j), j.kind, j.worker, `${j.attempts}/${j.max_attempts}`,
+                            when(j.finished_at), took(j), result(j)]),
+          "No job has finished yet.");
+    document.getElementById("error").textContent = "";
+    document.getElementById("updated").textContent = `updated ${new Date().toLocaleTimeString()}`;
+  } catch (e) {
+    document.getElementById("error").textContent = e.message;
+  }
+}
+
+document.getElementById("main").addEventListener("click", async e => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  const {pause, resume, now} = b.dataset;
+  try {
+    if (resume) {
+      await api("POST", `/workers/${encodeURIComponent(resume)}/resume`);
+    } else if (pause) {
+      if (now && !confirm(`Kill and requeue the job running on ${pause}?`)) return;
+      const seconds = document.getElementById("for").value;
+      await api("POST", `/workers/${encodeURIComponent(pause)}/pause`,
+                {now: Boolean(now), for_seconds: seconds ? Number(seconds) : null});
+    }
+  } catch (err) {
+    document.getElementById("error").textContent = err.message;
+  }
+  refresh();
+});
+
+function logout() {
+  localStorage.removeItem("corral-token");
+  token = null;
+  document.getElementById("main").hidden = true;
+  document.getElementById("login").hidden = false;
+}
+
+document.getElementById("login").addEventListener("submit", e => {
+  e.preventDefault();
+  token = document.getElementById("token").value;
+  localStorage.setItem("corral-token", token);
+  start();
+});
+
+function start() {
+  document.getElementById("login").hidden = true;
+  document.getElementById("main").hidden = false;
+  refresh();
+}
+
+setInterval(() => { if (token) refresh(); }, REFRESH_MS);
+if (token) start(); else logout();
+</script>
+</body>
+</html>
