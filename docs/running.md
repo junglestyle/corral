@@ -120,6 +120,19 @@ corral kill 42                 # stop and requeue
 corral cancel 42               # remove for good
 ```
 
+## Dashboard
+
+Open the server's address, e.g. `http://nas:8700/`, and give it `CORRAL_TOKEN` once; the browser keeps it until a
+request is refused. The page refreshes every 5 s and shows:
+
+- **Workers**: the same states and notes as `corral ls`, with pause, pause now (after a confirmation) and resume
+  per worker, and pause all and resume all. The "pause for" choice applies to every pause button.
+- **Queue**: running jobs, then queued ones, newest first. That isn't the order they'll run in, which depends on
+  aging.
+- **History**: the 50 most recent finished jobs, newest first, with how long each took and its result.
+
+Kill and cancel stay on the CLI.
+
 ## Known limits
 
 - The worker learns about foreign GPU use only before each lease and on heartbeats, and a lease long-polls for

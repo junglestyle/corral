@@ -30,8 +30,8 @@ dependencies beyond `then`, and multi-user anything.
 - **Server.** One process on an always-on host, such as a NAS. It owns the SQLite queue, the HTTP API, and outgoing events.
 - **Worker.** One process per machine. It advertises capability labels (`gpu`, `cpu`, anything else) and leases
   one job at a time whose needs it has and whose kind it has configured, runs it, and reports back.
-- **Dashboard** (milestone 5). Pages served by the server. It reads and pauses through the same API as the CLI, so
-  it never talks to workers directly.
+- **Dashboard.** A page served by the server: workers, the queue, recent history, and pause and resume. It reads
+  and pauses through the same API and token as the CLI, so it never talks to workers directly.
 - **CLI.** `corral` talks to the server for everything: `server`, `worker`, `enqueue`, `ls`, `pause`, `resume`,
   `kill`, `cancel`.
 
@@ -208,6 +208,7 @@ the hint.
 | `GET` | `/workers` | Workers, their state (`idle`, `running`, `draining`, `paused`, `blocked`), current job, foreign processes |
 | `POST` | `/workers/{name}/pause` | `{"now": bool, "for_seconds": int?}` |
 | `POST` | `/workers/{name}/resume` | |
+| `GET` | `/` | The dashboard page. The one path that needs no token: the page holds no data and asks for the token. |
 
 A kill, cancel or `pause --now` reaches a running job through the heartbeat response, which tells the worker to kill it.
 Heartbeat and finish answer `409` when the lease id is no longer current. Enqueue answers `201` for a new job and

@@ -51,7 +51,7 @@ uv run corral enqueue hello
 uv run corral ls
 ```
 
-Webhooks and chunking hints are specified but not built yet. See [running corral](docs/running.md), the
+Open `$CORRAL_URL` in a browser for the dashboard. See [running corral](docs/running.md), the
 [specification](docs/SPEC.md), and [stack and decisions](docs/stack.md).
 
 MIT. See [LICENSE](LICENSE).

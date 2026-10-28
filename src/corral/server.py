@@ -8,11 +8,12 @@ import secrets
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from importlib.resources import files
 from typing import Annotated, Any
 
 import httpx
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query, Request, Response
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from corral.queue import Conflict, JobSpec, NotFound, Queue
@@ -63,7 +64,8 @@ def create_app(queue: Queue, token: str) -> FastAPI:
         yield
         task.cancel()
 
-    app = FastAPI(title="corral", dependencies=[Depends(authorize)], lifespan=lifespan)
+    app = FastAPI(title="corral", lifespan=lifespan)
+    api = APIRouter(dependencies=[Depends(authorize)])
 
     @app.exception_handler(NotFound)
     def not_found(_: Request, e: NotFound) -> JSONResponse:
@@ -73,29 +75,34 @@ def create_app(queue: Queue, token: str) -> FastAPI:
     def conflict(_: Request, e: Conflict) -> JSONResponse:
         return JSONResponse({"detail": str(e)}, status_code=409)
 
-    @app.post("/jobs")
+    # The page holds no data and asks for the token itself, then reads and pauses through the API below.
+    @app.get("/", response_class=HTMLResponse)
+    def dashboard() -> str:
+        return files("corral").joinpath("dashboard.html").read_text()
+
+    @api.post("/jobs")
     def enqueue(spec: JobSpec, response: Response) -> dict[str, Any]:
         job, created = queue.enqueue(spec)
         response.status_code = 201 if created else 200
         return job
 
-    @app.get("/jobs")
+    @api.get("/jobs")
     def jobs(state: Annotated[list[str], Query()] = [], limit: int = 100) -> list[dict[str, Any]]:  # noqa: B006
         return queue.jobs(state, limit)
 
-    @app.get("/jobs/{job_id}")
+    @api.get("/jobs/{job_id}")
     def job(job_id: int) -> dict[str, Any]:
         return queue.get(job_id)
 
-    @app.post("/jobs/{job_id}/kill")
+    @api.post("/jobs/{job_id}/kill")
     def kill(job_id: int) -> dict[str, Any]:
         return queue.kill(job_id)
 
-    @app.post("/jobs/{job_id}/cancel")
+    @api.post("/jobs/{job_id}/cancel")
     def cancel(job_id: int) -> dict[str, Any]:
         return queue.cancel(job_id)
 
-    @app.post("/lease", response_model=None)
+    @api.post("/lease", response_model=None)
     async def lease(req: LeaseRequest) -> dict[str, Any] | Response:
         foreign = [p.model_dump() for p in req.foreign]
         deadline = time.monotonic() + req.wait
@@ -107,28 +114,29 @@ def create_app(queue: Queue, token: str) -> FastAPI:
                 return Response(status_code=204)
             await asyncio.sleep(POLL_SECONDS)
 
-    @app.post("/leases/{lease_id}/heartbeat")
+    @api.post("/leases/{lease_id}/heartbeat")
     def heartbeat(lease_id: str, body: Heartbeat) -> dict[str, bool]:
         return {"kill": queue.heartbeat(lease_id, [p.model_dump() for p in body.foreign])}
 
-    @app.post("/leases/{lease_id}/finish")
+    @api.post("/leases/{lease_id}/finish")
     def finish(lease_id: str, body: Finish) -> dict[str, Any]:
         return queue.finish(lease_id, body.exit_code, body.result)
 
-    @app.get("/workers")
+    @api.get("/workers")
     def workers() -> list[dict[str, Any]]:
         return queue.workers()
 
-    @app.post("/workers/{name}/pause")
+    @api.post("/workers/{name}/pause")
     def pause(name: str, body: Pause) -> dict[str, str]:
         queue.pause(name, body.now, body.for_seconds)
         return {"paused": name}
 
-    @app.post("/workers/{name}/resume")
+    @api.post("/workers/{name}/resume")
     def resume(name: str) -> dict[str, str]:
         queue.resume(name)
         return {"resumed": name}
 
+    app.include_router(api)
     return app
 
 

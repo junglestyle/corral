@@ -1,3 +1,4 @@
+import re
 import sys
 import threading
 import time
@@ -71,8 +72,17 @@ def test_enqueue_lease_run_finish_chain(client: Client) -> None:
     assert not run_once(cfg, client, wait=0)
 
 
-def test_unauthorized_is_rejected(app: FastAPI) -> None:
-    assert TestClient(app).get("/jobs").status_code == 401
+def test_only_the_dashboard_page_is_open_without_the_token(app: FastAPI) -> None:
+    anonymous = TestClient(app)
+    page = anonymous.get("/")
+    assert page.status_code == 200
+    assert page.headers["content-type"].startswith("text/html")
+    api = {p: ops for p, ops in app.openapi()["paths"].items() if p != "/"}
+    assert "/workers/{name}/pause" in api
+    for template, ops in api.items():
+        path = re.sub(r"\{\w+\}", "1", template)
+        for method in ops:
+            assert anonymous.request(method, path).status_code == 401, (method, template)
 
 
 def test_foreign_gpu_process_blocks_gpu_work_only(
