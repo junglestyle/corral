@@ -7,9 +7,41 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v6
       - run: uv sync --frozen
       - run: make check
   standards:
     uses: junglestyle/.github/.github/workflows/standards-check.yml@main
+  # Pull requests build the image to prove it builds; pushes to main publish it, tagged only by commit.
+  image:
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/junglestyle/corral
+      PUBLISH: ${{ github.ref == 'refs/heads/main' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - if: env.PUBLISH == 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64
+          push: ${{ env.PUBLISH == 'true' }}
+          tags: ${{ env.IMAGE }}:${{ github.sha }}
+          # Links the ghcr.io package to this repo.
+          labels: org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+      - if: env.PUBLISH == 'true'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: echo "Pushed \`$IMAGE@$DIGEST\` (tag \`$GITHUB_SHA\`)" >> "$GITHUB_STEP_SUMMARY"

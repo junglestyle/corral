@@ -29,16 +29,22 @@ and any events not yet delivered.
 
 The server reads it at start, so restart it after a change.
 
-Run it in Docker with [`examples/compose.yaml`](../examples/compose.yaml), which builds the repo's `Dockerfile`:
+Run it in Docker. CI publishes the server image to `ghcr.io/junglestyle/corral` for each commit on `main`, built for
+`linux/amd64` and tagged with the commit's full SHA. There's no `latest` or version tag. A deployment pins the image
+by digest, `ghcr.io/junglestyle/corral@sha256:…`, which the commit's check run shows in its summary. A deployment
+repo keeps that pin in a copy of [`examples/compose.yaml`](../examples/compose.yaml), with `image:` set to it and no
+`build:`, and upgrades by changing the pin.
+
+Or build it from a clone with `examples/compose.yaml`, which builds the repo's `Dockerfile`, and re-run the same
+command after pulling to update it:
 
 ```sh
 docker compose --env-file /path/to/env -f examples/compose.yaml up -d --build
 ```
 
-The compose file reads `server.toml` from `CORRAL_DATA`, so put one there, even an empty one. The server runs as uid
-8700, so give it the directory: `chown -R 8700:8700 "$CORRAL_DATA"`. The env file sets
-three variables, and a worker on the same host can share it for `CORRAL_URL` and
-`CORRAL_TOKEN`:
+Either way, the compose file reads `server.toml` from `CORRAL_DATA`, so put one there, even an empty one. The server
+runs as uid 8700, so give it the directory: `chown -R 8700:8700 "$CORRAL_DATA"`. The env file sets three variables,
+and a worker on the same host can share it for `CORRAL_URL` and `CORRAL_TOKEN`:
 
 | Variable | Meaning |
 | --- | --- |
@@ -48,7 +54,7 @@ three variables, and a worker on the same host can share it for `CORRAL_URL` and
 
 The container uses host networking so the server binds `CORRAL_HOST` and nothing else; a NAS often has a public
 IPv6 address that a published port would also answer on. Docker restarts the server at boot, and again until
-`CORRAL_HOST` exists if its interface comes up late. Re-run the same command after pulling to update it.
+`CORRAL_HOST` exists if its interface comes up late.
 
 ## Worker
 
