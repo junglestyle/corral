@@ -17,6 +17,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from corral.queue import Conflict, JobSpec, NotFound, Queue
+from corral.records import Job, JobState, Lease, Proc, Worker
 from corral.webhooks import deliver
 
 MAX_WAIT_SECONDS = 30
@@ -24,11 +25,6 @@ POLL_SECONDS = 1.0
 HOUSEKEEPING_SECONDS = 1.0
 
 log = logging.getLogger("corral.server")
-
-
-class Proc(BaseModel):
-    pid: int
-    name: str
 
 
 class LeaseRequest(BaseModel):
@@ -81,33 +77,32 @@ def create_app(queue: Queue, token: str) -> FastAPI:
         return files("corral").joinpath("dashboard.html").read_text()
 
     @api.post("/jobs")
-    def enqueue(spec: JobSpec, response: Response) -> dict[str, Any]:
+    def enqueue(spec: JobSpec, response: Response) -> Job:
         job, created = queue.enqueue(spec)
         response.status_code = 201 if created else 200
         return job
 
     @api.get("/jobs")
-    def jobs(state: Annotated[list[str], Query()] = [], limit: int = 100) -> list[dict[str, Any]]:  # noqa: B006
+    def jobs(state: Annotated[list[JobState], Query()] = [], limit: int = 100) -> list[Job]:  # noqa: B006
         return queue.jobs(state, limit)
 
     @api.get("/jobs/{job_id}")
-    def job(job_id: int) -> dict[str, Any]:
+    def job(job_id: int) -> Job:
         return queue.get(job_id)
 
     @api.post("/jobs/{job_id}/kill")
-    def kill(job_id: int) -> dict[str, Any]:
+    def kill(job_id: int) -> Job:
         return queue.kill(job_id)
 
     @api.post("/jobs/{job_id}/cancel")
-    def cancel(job_id: int) -> dict[str, Any]:
+    def cancel(job_id: int) -> Job:
         return queue.cancel(job_id)
 
     @api.post("/lease", response_model=None)
-    async def lease(req: LeaseRequest) -> dict[str, Any] | Response:
-        foreign = [p.model_dump() for p in req.foreign]
+    async def lease(req: LeaseRequest) -> Lease | Response:
         deadline = time.monotonic() + req.wait
         while True:
-            job = queue.lease(req.worker, req.offers, req.kinds, foreign)
+            job = queue.lease(req.worker, req.offers, req.kinds, req.foreign)
             if job is not None:
                 return job
             if time.monotonic() >= deadline:
@@ -116,14 +111,14 @@ def create_app(queue: Queue, token: str) -> FastAPI:
 
     @api.post("/leases/{lease_id}/heartbeat")
     def heartbeat(lease_id: str, body: Heartbeat) -> dict[str, bool]:
-        return {"kill": queue.heartbeat(lease_id, [p.model_dump() for p in body.foreign])}
+        return {"kill": queue.heartbeat(lease_id, body.foreign)}
 
     @api.post("/leases/{lease_id}/finish")
-    def finish(lease_id: str, body: Finish) -> dict[str, Any]:
+    def finish(lease_id: str, body: Finish) -> Job:
         return queue.finish(lease_id, body.exit_code, body.result)
 
     @api.get("/workers")
-    def workers() -> list[dict[str, Any]]:
+    def workers() -> list[Worker]:
         return queue.workers()
 
     @api.post("/workers/{name}/pause")

@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from corral import worker
 from corral.client import Client
 from corral.queue import LEASE_SECONDS, Queue
+from corral.records import Proc
 from corral.server import create_app
 from corral.worker import Config, Kind, run_once
 
@@ -63,12 +64,12 @@ def test_enqueue_lease_run_finish_chain(client: Client) -> None:
     job, _ = client.enqueue({"kind": "first", "args": {"path": "/x"}, "then": [{"kind": "second"}]})
 
     assert run_once(cfg, client, wait=0)
-    done = client.http.get(f"/jobs/{job['id']}").json()
+    done = client.http.get(f"/jobs/{job.id}").json()
     assert done["state"] == "succeeded"
     assert done["result"] == {"items": 3, "args": '{"path": "/x"}'}
 
     assert run_once(cfg, client, wait=0)
-    assert [j["state"] for j in client.jobs(["succeeded"], 10)] == ["succeeded", "succeeded"]
+    assert [j.state for j in client.jobs(["succeeded"], 10)] == ["succeeded", "succeeded"]
     assert not run_once(cfg, client, wait=0)
 
 
@@ -100,16 +101,16 @@ def test_foreign_gpu_process_blocks_gpu_work_only(
     cpu_job, _ = client.enqueue({"kind": "tidy", "needs": ["cpu"], "priority": 0})
 
     assert run_once(cfg, client, wait=0)
-    assert client.http.get(f"/jobs/{cpu_job['id']}").json()["state"] == "succeeded"
-    assert client.http.get(f"/jobs/{gpu_job['id']}").json()["state"] == "queued"
+    assert client.http.get(f"/jobs/{cpu_job.id}").json()["state"] == "succeeded"
+    assert client.http.get(f"/jobs/{gpu_job.id}").json()["state"] == "queued"
     (worker,) = client.workers()
-    assert worker["state"] == "blocked"
-    assert worker["foreign"] == [{"pid": 4242, "name": "/usr/bin/python3"}]
+    assert worker.state == "blocked"
+    assert worker.foreign == [Proc(4242, "/usr/bin/python3")]
 
     smi.write_text("#!/bin/sh\necho '17, /usr/lib/Xorg'\n")
     assert run_once(cfg, client, wait=0)
-    assert client.http.get(f"/jobs/{gpu_job['id']}").json()["state"] == "succeeded"
-    assert client.workers()[0]["state"] == "idle"
+    assert client.http.get(f"/jobs/{gpu_job.id}").json()["state"] == "succeeded"
+    assert client.workers()[0].state == "idle"
 
 
 def run_in_background(app: FastAPI, cfg: Config) -> threading.Thread:
@@ -135,10 +136,10 @@ def test_kill_stops_the_process_and_requeues(app: FastAPI, client: Client) -> No
     job, _ = client.enqueue({"kind": "slow"})
     thread = run_in_background(app, config([], slow=["sleep", "30"]))
     wait_until(lambda: client.jobs(["leased"], 1) != [])
-    client.kill(job["id"])
+    client.kill(job.id)
     thread.join(timeout=10)
     assert not thread.is_alive()
-    after = client.http.get(f"/jobs/{job['id']}").json()
+    after = client.http.get(f"/jobs/{job.id}").json()
     assert after["state"] == "queued" and after["attempts"] == 0
 
 
@@ -152,9 +153,9 @@ def test_lost_lease_stops_the_process_and_drops_the_outcome(
     clock.t += LEASE_SECONDS + 1
     thread.join(timeout=10)
     assert not thread.is_alive()
-    after = client.http.get(f"/jobs/{job['id']}").json()
+    after = client.http.get(f"/jobs/{job.id}").json()
     assert after["state"] == "queued" and after["attempts"] == 1
-    assert [j["kind"] for j in client.jobs(["queued"], 10)] == ["slow"]
+    assert [j.kind for j in client.jobs(["queued"], 10)] == ["slow"]
 
 
 def test_kinds_drop_ins_add_kinds_and_never_override(tmp_path: Path) -> None:
@@ -182,4 +183,4 @@ def test_kinds_drop_ins_add_kinds_and_never_override(tmp_path: Path) -> None:
 def test_worker_without_kinds_takes_nothing(client: Client) -> None:
     client.enqueue({"kind": "a"})
     assert not run_once(config(["cpu"]), client, wait=0)
-    assert [j["state"] for j in client.jobs(["queued"], 10)] == ["queued"]
+    assert [j.state for j in client.jobs(["queued"], 10)] == ["queued"]

@@ -46,13 +46,7 @@ Where Corral doesn't follow the org standards yet. These are debt to pay down, n
 
 - Logging: `corral.cli` configures its own timestamps (`%(asctime)s`). python.md leaves timestamps to journald or
   Docker.
-- Typing: jobs travel as `dict[str, Any]` from the HTTP client through the worker (`client.py`, `worker.py`), not
-  as a typed record parsed at the edge.
 - Dependencies: FastAPI and uvicorn have no ADR in [stack.md](stack.md), only a row in its table.
-- SQL: `jobs.state` holds a closed set of names with no `CHECK`, and they're literals, not a `StrEnum`.
-- Containers: the image gets uv from `ghcr.io/astral-sh/uv:python3.12-bookworm-slim`, whose tag doesn't pin uv's
-  version.
-- Containers: the image has no `USER`, so the server runs as root.
 - Containers: `examples/compose.yaml` sets no `logging:`.
 - Shell: `examples/system-worker.sh` is `sh` with `set -eu`, not bash with `set -euo pipefail`, and its header doesn't
   show how to call it.

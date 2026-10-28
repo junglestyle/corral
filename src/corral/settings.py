@@ -10,16 +10,13 @@ from pathlib import Path
 from typing import Any
 
 from corral.duration import parse_duration
+from corral.records import FINISHED_STATES
 
 
 class Event(StrEnum):
     JOB_FINISHED = "job.finished"
     WORKER_BLOCKED = "worker.blocked"
     WORKER_UNBLOCKED = "worker.unblocked"
-
-
-# The states a job.finished event can carry.
-FINISHED_STATES = frozenset({"succeeded", "failed", "cancelled"})
 
 
 @dataclass(frozen=True)
@@ -82,8 +79,8 @@ def _webhook(raw: Mapping[str, Any]) -> Webhook:
         raise ValueError("each webhook needs a url")
     events = frozenset(raw.get("events", []))
     if unknown := events - set(Event):
-        raise ValueError(f"unknown events {sorted(unknown)!r}; known: {sorted(Event)!r}")
+        raise ValueError(f"unknown events {sorted(unknown)!r}; known: {sorted(map(str, Event))!r}")
     states = frozenset(raw.get("states", []))
     if unknown := states - FINISHED_STATES:
-        raise ValueError(f"unknown states {sorted(unknown)!r}; known: {sorted(FINISHED_STATES)!r}")
+        raise ValueError(f"unknown states {sorted(unknown)!r}; known: {sorted(map(str, FINISHED_STATES))!r}")
     return Webhook(url=raw["url"], events=events, kinds=frozenset(raw.get("kinds", [])), states=states)
