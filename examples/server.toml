@@ -11,6 +11,12 @@ window = "5m"
 url = "https://ntfy.sh/your-topic"
 events = ["worker.blocked", "worker.unblocked"]
 
+# Jobs that failed for good, to the same phone.
+[[webhooks]]
+url = "https://ntfy.sh/your-topic"
+events = ["job.finished"]
+states = ["failed"]
+
 # Every finished transcription to a service that decides what to enqueue next.
 [[webhooks]]
 url = "http://consumer:8000/corral"

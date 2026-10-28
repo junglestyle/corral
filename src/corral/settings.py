@@ -18,15 +18,24 @@ class Event(StrEnum):
     WORKER_UNBLOCKED = "worker.unblocked"
 
 
+# The states a job.finished event can carry.
+FINISHED_STATES = frozenset({"succeeded", "failed", "cancelled"})
+
+
 @dataclass(frozen=True)
 class Webhook:
     url: str
     events: frozenset[str] = frozenset()
     kinds: frozenset[str] = frozenset()
+    states: frozenset[str] = frozenset()
 
-    def wants(self, event: Event, kind: str | None) -> bool:
-        """An empty filter matches everything; a kind filter never matches an event that isn't about a job."""
-        return (not self.events or event in self.events) and (not self.kinds or kind in self.kinds)
+    def wants(self, event: Event, kind: str | None, state: str | None = None) -> bool:
+        """An empty filter matches everything; a kind or state filter matches only events about a job."""
+        return (
+            (not self.events or event in self.events)
+            and (not self.kinds or kind in self.kinds)
+            and (not self.states or state in self.states)
+        )
 
 
 @dataclass(frozen=True)
@@ -74,4 +83,7 @@ def _webhook(raw: Mapping[str, Any]) -> Webhook:
     events = frozenset(raw.get("events", []))
     if unknown := events - set(Event):
         raise ValueError(f"unknown events {sorted(unknown)!r}; known: {sorted(Event)!r}")
-    return Webhook(url=raw["url"], events=events, kinds=frozenset(raw.get("kinds", [])))
+    states = frozenset(raw.get("states", []))
+    if unknown := states - FINISHED_STATES:
+        raise ValueError(f"unknown states {sorted(unknown)!r}; known: {sorted(FINISHED_STATES)!r}")
+    return Webhook(url=raw["url"], events=events, kinds=frozenset(raw.get("kinds", [])), states=states)

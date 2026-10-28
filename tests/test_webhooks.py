@@ -11,12 +11,13 @@ from fastapi.testclient import TestClient
 
 from corral.queue import Queue
 from corral.server import create_app
-from corral.settings import Settings, Webhook, load_settings
+from corral.settings import Event, Settings, Webhook, load_settings
 from corral.webhooks import deliver
 
 EVERYTHING = Webhook("http://all")
 BLOCKS = Webhook("http://alerts", events=frozenset({"worker.blocked", "worker.unblocked"}))
 TRANSCRIBES = Webhook("http://next-step", kinds=frozenset({"transcribe"}))
+FAILURES = Webhook("http://phone", states=frozenset({"failed"}))
 GPU_HOG = {"pid": 4242, "name": "/usr/bin/python3"}
 
 
@@ -47,6 +48,16 @@ def test_finished_jobs_reach_the_webhooks_that_want_them(q: Queue) -> None:
     assert body["job"]["args"] == {"path": "/x"} and body["job"]["worker"] == "w"
     assert body["result"] == {"items": 2, "note": "kept"}
     assert sent(q) == []
+
+
+def test_a_state_filter_passes_only_jobs_that_ended_that_way(tmp_path: Path, clock: Clock) -> None:
+    q = Queue(str(tmp_path / "q.sqlite"), Settings(webhooks=(FAILURES,)), clock)
+    add(q, max_attempts=1)
+    q.finish(lease(q)["lease_id"], 0, None)
+    add(q, max_attempts=1)
+    q.finish(lease(q)["lease_id"], 1, None)
+    assert [b["job"]["state"] for _, b in sent(q)] == ["failed"]
+    assert not FAILURES.wants(Event.WORKER_BLOCKED, None)
 
 
 def test_only_a_job_ending_is_an_event(q: Queue) -> None:
@@ -167,6 +178,10 @@ def test_settings_file(tmp_path: Path) -> None:
 
     path.write_text('[[webhooks]]\nurl = "http://x"\nevents = ["job.done"]\n')
     with pytest.raises(SystemExit, match=r"job\.done"):
+        load_settings(path)
+
+    path.write_text('[[webhooks]]\nurl = "http://x"\nstates = ["failed", "done"]\n')
+    with pytest.raises(SystemExit, match=r"'done'"):
         load_settings(path)
 
 

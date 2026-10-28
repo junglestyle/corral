@@ -348,7 +348,7 @@ class Queue:
     def _finished(self, db: sqlite3.Connection, row: sqlite3.Row) -> None:
         job = _job(row)
         body = {"job": {k: job[k] for k in FINISHED_FIELDS}, "result": job["result"]}
-        self._emit(db, Event.JOB_FINISHED, body, row["kind"])
+        self._emit(db, Event.JOB_FINISHED, body, row["kind"], row["state"])
 
     def _time(self, db: sqlite3.Connection, kind: str, seconds: float, items: object) -> None:
         """Folds a successful run into its kind's average seconds per item."""
@@ -368,10 +368,15 @@ class Queue:
         return max(1, floor(self.settings.window_for(kind) / max(float(row["seconds_per_item"]), 1e-6)))
 
     def _emit(
-        self, db: sqlite3.Connection, event: Event, body: dict[str, Any], kind: str | None = None
+        self,
+        db: sqlite3.Connection,
+        event: Event,
+        body: dict[str, Any],
+        kind: str | None = None,
+        state: str | None = None,
     ) -> None:
         """Queues the event for each webhook that wants it, in the caller's transaction."""
-        urls = [w.url for w in self.settings.webhooks if w.wants(event, kind)]
+        urls = [w.url for w in self.settings.webhooks if w.wants(event, kind, state)]
         if not urls:
             return
         now = self.clock()
