@@ -1,4 +1,4 @@
-<!-- junglestyle/.github code-standards/shell.md at 2844d4ade90336f782d485d09dc2f8b984b99926. Change it there, then run make sync-standards. -->
+<!-- junglestyle/.github code-standards/shell.md at b67e538f4a83e8ee7f11716801f1c3d0819be19d. Change it there, then run make sync-standards. -->
 # Shell standards
 
 Decisions for shell scripts, beneath the org [standards](https://github.com/junglestyle/.github/blob/main/code-standards/README.md).
@@ -16,8 +16,8 @@ Decisions for shell scripts, beneath the org [standards](https://github.com/jung
 ## Safety
 
 - A script that installs, sets up or deploys is safe to re-run, and its header says so.
-- A secret the operator types is read with `read -rs`. A file the script writes a secret to is readable only by its owner.
-- Nothing pipes a download into a shell, and a tool a script installs is a pinned version.
+- A secret the operator types is read with `read -rs`.
+- Nothing pipes a download into a shell, and a tool a script installs from outside the distribution's packages is a pinned version.
 - Input from the operator or the network is checked against a pattern before it goes into a command string, such as a `sed` program or `sh -c`.
 
 ## Checking
