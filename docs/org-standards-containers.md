@@ -1,4 +1,4 @@
-<!-- junglestyle/.github code-standards/containers.md at b67e538f4a83e8ee7f11716801f1c3d0819be19d. Change it there, then run make sync-standards. -->
+<!-- junglestyle/.github code-standards/containers.md at b3d3bb1eb1b997100738fb5bb9dd2a2b9f45a9d4. Change it there, then run make sync-standards. -->
 # Container standards
 
 Decisions for Dockerfiles and compose files, beneath the org [standards](https://github.com/junglestyle/.github/blob/main/code-standards/README.md). Python images also follow [python.md](https://github.com/junglestyle/.github/blob/main/code-standards/python.md): they install with `uv sync --frozen`, never pip.
