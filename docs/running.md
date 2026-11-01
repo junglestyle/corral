@@ -85,14 +85,15 @@ Start the server first; a worker retries until it answers.
 systemd restarts the worker if it dies, and stopping the unit stops its job too, so nothing keeps running under a
 lease the server has given away.
 
-1. `uv tool install git+https://github.com/junglestyle/corral` puts `corral` in `~/.local/bin`.
+1. `uv tool install git+https://github.com/junglestyle/corral@COMMIT` puts `corral` in `~/.local/bin`, where
+   `COMMIT` is the full SHA the deployment pins.
 2. Write `~/.config/corral/env` with `CORRAL_URL` and `CORRAL_TOKEN`, mode 600.
 3. Write `~/.config/corral/worker.toml` with at least `name` and `offers`.
 4. Copy [`examples/corral-worker.service`](../examples/corral-worker.service) to `~/.config/systemd/user/`, then
    `systemctl --user daemon-reload && systemctl --user enable --now corral-worker`.
 5. `loginctl enable-linger` so it starts at boot without a login.
 
-Logs: `journalctl --user -u corral-worker`. Update with `uv tool upgrade corral`, then restart the unit.
+Logs: `journalctl --user -u corral-worker`. Update by running the same install with the new commit, then restart the unit.
 
 ### As a root system service
 
@@ -104,9 +105,10 @@ on a data pool and starts the worker as a root system service, so its jobs can u
 2. Write `DIR/env` with `CORRAL_URL` and `CORRAL_TOKEN`, mode 600. On the server's host this can be the server's
    env file.
 3. Write `DIR/worker.toml` with at least `name` and `offers`.
-4. Run `sudo sh examples/system-worker.sh DIR` from a clone.
+4. Run `sudo examples/system-worker.sh DIR COMMIT` from a clone, where `COMMIT` is the full SHA the deployment
+   pins.
 5. Run it at boot: on TrueNAS, add the same command as a post-init script under System > Advanced >
-   Init/Shutdown Scripts.
+   Init/Shutdown Scripts. To update, change the commit in that command and run it again.
 
 Logs: `journalctl -u corral-worker`.
 

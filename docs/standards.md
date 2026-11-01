@@ -45,14 +45,6 @@ an org rule, it says so, and it wins.
 Where Corral doesn't follow the org standards yet. These are debt to pay down, not overrides: each one should go.
 
 - Dependencies: FastAPI and uvicorn have no ADR in [stack.md](stack.md), only a row in its table.
-- Versions and pins: workers run corral from `main`, not a commit: [running.md](running.md) installs and upgrades with
-  `uv tool install git+https://github.com/junglestyle/corral` and `uv tool upgrade corral` (lines 88 and 95), and so
-  does `examples/system-worker.sh` (line 16).
-- Versions and pins: `pyproject.toml` has no lower bound for pydantic, which `client.py`, `queue.py` and `server.py`
-  import directly; it comes in only through FastAPI.
-- Versions and pins: `pyproject.toml` has no `[tool.uv] required-version`, so CI's `setup-uv`
-  (`.github/workflows/check.yml` line 11) installs the newest uv, and `examples/system-worker.sh` (line 15) runs uv's
-  latest installer with no checksum.
 - Privacy: examples use host names that aren't under `example.com`: `http://nas:8700` in [running.md](running.md)
   (lines 7 and 132), and `http://consumer:8000` in `examples/server.toml` (line 22).
 - Docs: [SPEC.md](SPEC.md)'s requirements are numbered 1–5 under one heading, not grouped by area, each opening with
@@ -74,7 +66,3 @@ Where Corral doesn't follow the org standards yet. These are debt to pay down, n
 - Python: worker config errors put the kind's name in without `!r` (`worker.py` lines 58, 75 and 79).
 - Python: `corral.cli` configures its own timestamps (`%(asctime)s`, `cli.py` line 65). python.md leaves timestamps to
   journald or Docker.
-- Shell: `examples/system-worker.sh` is `sh` with `set -eu`, not bash with `set -euo pipefail`, and its header doesn't
-  show how to call it.
-- Shell: `examples/system-worker.sh` pipes uv's installer into `sh` and installs corral from `main`, unpinned.
-- Shell: `make check` doesn't run shellcheck.
