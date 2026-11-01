@@ -6,7 +6,7 @@ import asyncio
 import logging
 import secrets
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from importlib.resources import files
 from typing import Annotated, Any
@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query, R
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
-from corral.queue import Conflict, JobSpec, NotFound, Queue
+from corral.queue import JobSpec, Queue, QueueError
 from corral.records import Job, JobState, Lease, Proc, Worker
 from corral.webhooks import deliver
 
@@ -25,6 +25,29 @@ POLL_SECONDS = 1.0
 HOUSEKEEPING_SECONDS = 1.0
 
 log = logging.getLogger("corral.server")
+
+
+class JobRequest(BaseModel):
+    """A job spec as a request body: the one place its fields are checked and its defaults set."""
+
+    kind: str = Field(min_length=1)
+    needs: list[str] = []
+    priority: int = Field(5, ge=0, le=9)
+    args: dict[str, Any] = {}
+    key: str | None = None
+    then: list[JobRequest] = []
+    max_attempts: int = Field(3, ge=1)
+
+    def spec(self) -> JobSpec:
+        return JobSpec(
+            kind=self.kind,
+            needs=self.needs,
+            priority=self.priority,
+            args=self.args,
+            key=self.key,
+            then=[t.spec() for t in self.then],
+            max_attempts=self.max_attempts,
+        )
 
 
 class LeaseRequest(BaseModel):
@@ -63,12 +86,8 @@ def create_app(queue: Queue, token: str) -> FastAPI:
     app = FastAPI(title="corral", lifespan=lifespan)
     api = APIRouter(dependencies=[Depends(authorize)])
 
-    @app.exception_handler(NotFound)
-    def not_found(_: Request, e: NotFound) -> JSONResponse:
-        return JSONResponse({"detail": str(e)}, status_code=404)
-
-    @app.exception_handler(Conflict)
-    def conflict(_: Request, e: Conflict) -> JSONResponse:
+    @app.exception_handler(QueueError)
+    def conflict(_: Request, e: QueueError) -> JSONResponse:
         return JSONResponse({"detail": str(e)}, status_code=409)
 
     # The page holds no data and asks for the token itself, then reads and pauses through the API below.
@@ -77,8 +96,8 @@ def create_app(queue: Queue, token: str) -> FastAPI:
         return files("corral").joinpath("dashboard.html").read_text()
 
     @api.post("/jobs")
-    def enqueue(spec: JobSpec, response: Response) -> Job:
-        job, created = queue.enqueue(spec)
+    def enqueue(body: JobRequest, response: Response) -> Job:
+        job, created = queue.enqueue(body.spec())
         response.status_code = 201 if created else 200
         return job
 
@@ -88,15 +107,15 @@ def create_app(queue: Queue, token: str) -> FastAPI:
 
     @api.get("/jobs/{job_id}")
     def job(job_id: int) -> Job:
-        return queue.get(job_id)
+        return one(queue.get, job_id)
 
     @api.post("/jobs/{job_id}/kill")
     def kill(job_id: int) -> Job:
-        return queue.kill(job_id)
+        return one(queue.kill, job_id)
 
     @api.post("/jobs/{job_id}/cancel")
     def cancel(job_id: int) -> Job:
-        return queue.cancel(job_id)
+        return one(queue.cancel, job_id)
 
     @api.post("/lease", response_model=None)
     async def lease(req: LeaseRequest) -> Lease | Response:
@@ -133,6 +152,15 @@ def create_app(queue: Queue, token: str) -> FastAPI:
 
     app.include_router(api)
     return app
+
+
+def one(action: Callable[[int], Job], job_id: int) -> Job:
+    """Runs a call on one job, answering 404 for an unknown id. Caught per route, not app-wide, so that a
+    LookupError from a bug elsewhere stays a 500."""
+    try:
+        return action(job_id)
+    except LookupError as e:
+        raise HTTPException(404, str(e)) from None
 
 
 async def housekeeping(queue: Queue) -> None:

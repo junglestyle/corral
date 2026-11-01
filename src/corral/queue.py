@@ -14,8 +14,6 @@ from importlib import resources
 from math import floor
 from typing import Any
 
-from pydantic import BaseModel, Field
-
 from corral.records import Job, JobState, Lease, Proc, Worker, WorkerState
 from corral.settings import Event, Settings
 
@@ -37,14 +35,17 @@ class Stop(StrEnum):
     CANCEL = "cancel"
 
 
-class JobSpec(BaseModel):
-    kind: str = Field(min_length=1)
-    needs: list[str] = []
-    priority: int = Field(5, ge=0, le=9)
-    args: dict[str, Any] = {}
-    key: str | None = None
-    then: list[JobSpec] = []
-    max_attempts: int = Field(3, ge=1)
+@dataclass(frozen=True)
+class JobSpec:
+    """A job to enqueue, already validated: the server's request body checks it and fills in the defaults."""
+
+    kind: str
+    needs: list[str]
+    priority: int
+    args: dict[str, Any]
+    key: str | None
+    then: list[JobSpec]
+    max_attempts: int
 
 
 @dataclass(frozen=True)
@@ -56,11 +57,7 @@ class Delivery:
     body: dict[str, Any]
 
 
-class NotFound(Exception):
-    pass
-
-
-class Conflict(Exception):
+class QueueError(Exception):
     """The job isn't in a state that allows this, or the lease is no longer the caller's."""
 
 
@@ -173,7 +170,7 @@ class Queue:
             self._expire(db)
             row = self._row(db, job_id)
             if row["state"] != JobState.LEASED:
-                raise Conflict(f"job {job_id} is {row['state']}, not running")
+                raise QueueError(f"job {job_id} is {row['state']}, not running")
             db.execute("UPDATE jobs SET stop = ? WHERE id = ? AND stop IS NULL", (Stop.REQUEUE, job_id))
             return _job(self._row(db, job_id))
 
@@ -191,7 +188,7 @@ class Queue:
             elif row["state"] == JobState.LEASED:
                 db.execute("UPDATE jobs SET stop = ? WHERE id = ?", (Stop.CANCEL, job_id))
             else:
-                raise Conflict(f"job {job_id} already {row['state']}")
+                raise QueueError(f"job {job_id} already {row['state']}")
             return _job(self._row(db, job_id))
 
     def pause(self, name: str, now: bool = False, for_seconds: float | None = None) -> None:
@@ -311,7 +308,7 @@ class Queue:
                 spec.priority,
                 json.dumps(spec.args),
                 spec.key,
-                json.dumps([t.model_dump() for t in spec.then]),
+                json.dumps([asdict(t) for t in spec.then]),
                 spec.max_attempts,
                 JobState.QUEUED,
                 self.clock(),
@@ -355,7 +352,7 @@ class Queue:
             if (result or {}).get("more") is True:
                 self._enqueue(db, _spec(row))
             for spec in json.loads(row["then_specs"]):
-                self._enqueue(db, JobSpec.model_validate(spec))
+                self._enqueue(db, _stored_spec(spec))
         self._finished(db, self._row(db, row["id"]))
 
     def _finished(self, db: sqlite3.Connection, row: sqlite3.Row) -> None:
@@ -485,7 +482,7 @@ class Queue:
     def _row(self, db: sqlite3.Connection, job_id: int) -> sqlite3.Row:
         row: sqlite3.Row | None = db.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
         if row is None:
-            raise NotFound(f"no job {job_id}")
+            raise LookupError(f"no job {job_id}")
         return row
 
     def _leased(self, db: sqlite3.Connection, lease_id: str) -> sqlite3.Row:
@@ -493,7 +490,7 @@ class Queue:
             "SELECT * FROM jobs WHERE lease_id = ? AND state = ?", (lease_id, JobState.LEASED)
         ).fetchone()
         if row is None:
-            raise Conflict("lease expired or already finished")
+            raise QueueError("lease expired or already finished")
         return row
 
 
@@ -552,6 +549,19 @@ def _spec(row: sqlite3.Row) -> JobSpec:
         priority=row["priority"],
         args=json.loads(row["args"]),
         key=row["key"],
-        then=[JobSpec.model_validate(t) for t in json.loads(row["then_specs"])],
+        then=[_stored_spec(t) for t in json.loads(row["then_specs"])],
         max_attempts=row["max_attempts"],
+    )
+
+
+def _stored_spec(d: dict[str, Any]) -> JobSpec:
+    """A `then` spec as the queue stored it: every field present, and checked when it was enqueued."""
+    return JobSpec(
+        kind=d["kind"],
+        needs=d["needs"],
+        priority=d["priority"],
+        args=d["args"],
+        key=d["key"],
+        then=[_stored_spec(t) for t in d["then"]],
+        max_attempts=d["max_attempts"],
     )

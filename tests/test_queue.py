@@ -1,11 +1,13 @@
+import re
 import sqlite3
+from enum import StrEnum
 from pathlib import Path
 
 import pytest
-from conftest import Clock, add, lease
+from conftest import Clock, add, lease, spec
 
 import corral
-from corral.queue import ALL, LEASE_SECONDS, Conflict, JobSpec, Queue, Stop
+from corral.queue import ALL, LEASE_SECONDS, Queue, QueueError, Stop
 from corral.records import JobState
 
 
@@ -42,9 +44,9 @@ def test_stale_lease_is_rejected_and_never_chains(q: Queue, clock: Clock) -> Non
     clock.t += LEASE_SECONDS + 1
     new = lease(q, "b")
     assert new.id == job and new.lease_id != old.lease_id
-    with pytest.raises(Conflict):
+    with pytest.raises(QueueError):
         q.heartbeat(old.lease_id, [])
-    with pytest.raises(Conflict):
+    with pytest.raises(QueueError):
         q.finish(old.lease_id, 0, {"items": 1})
     assert q.jobs(["queued"]) == []
     q.finish(new.lease_id, 0, None)
@@ -69,12 +71,12 @@ def test_failure_retries_until_max_attempts(q: Queue) -> None:
 
 
 def test_key_coalesces_only_while_queued(q: Queue) -> None:
-    first, created = q.enqueue(JobSpec(kind="k", key="batch"))
-    again, created_again = q.enqueue(JobSpec(kind="k", key="batch"))
+    first, created = q.enqueue(spec(key="batch"))
+    again, created_again = q.enqueue(spec(key="batch"))
     assert created and not created_again and again.id == first.id
     lease(q)
     # Once it's running it may already have missed new input, so the next one queues.
-    _, created_while_running = q.enqueue(JobSpec(kind="k", key="batch"))
+    _, created_while_running = q.enqueue(spec(key="batch"))
     assert created_while_running
 
 
@@ -157,7 +159,7 @@ def test_cancel(q: Queue) -> None:
     assert q.heartbeat(got.lease_id, []) is True
     q.finish(got.lease_id, -15, None)
     assert q.get(queued).state == "cancelled"
-    with pytest.raises(Conflict):
+    with pytest.raises(QueueError):
         q.cancel(queued)
 
 
@@ -188,14 +190,11 @@ def test_a_database_from_before_migrations_upgrades_in_place(tmp_path: Path, clo
     assert Queue(str(path), clock=clock).workers()[0].name == "w"
 
 
-def test_the_database_refuses_a_state_or_stop_the_code_doesnt_know(q: Queue) -> None:
-    job = add(q)
+@pytest.mark.parametrize(("column", "enum"), [("state", JobState), ("stop", Stop)])
+def test_each_enum_is_exactly_its_columns_check_list(q: Queue, column: str, enum: type[StrEnum]) -> None:
     db = sqlite3.connect(q.path)
-    for state in JobState:
-        db.execute("UPDATE jobs SET state = ? WHERE id = ?", (state, job))
-    for stop in Stop:
-        db.execute("UPDATE jobs SET stop = ? WHERE id = ?", (stop, job))
-    for column in ("state", "stop"):
-        with pytest.raises(sqlite3.IntegrityError, match="CHECK"):
-            db.execute(f"UPDATE jobs SET {column} = 'done' WHERE id = ?", (job,))
+    (sql,) = db.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'jobs'").fetchone()
     db.close()
+    check = re.search(rf"CHECK \({column} IN \(([^)]*)\)\)", sql)
+    assert check is not None
+    assert set(re.findall(r"'([^']*)'", check.group(1))) == {str(v) for v in enum}
