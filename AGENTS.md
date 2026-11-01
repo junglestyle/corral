@@ -5,6 +5,7 @@ Priority job scheduler for opportunistic local compute.
 Read before changing behavior:
 
 - [Specification](docs/SPEC.md): what corral does
+- [Roadmap](docs/ROADMAP.md): the order it gets built in
 - [Coding standards](docs/standards.md): how the code should read, on top of the org's [principles](https://github.com/junglestyle/.github/blob/main/PRINCIPLES.md) and standards (`docs/org-standards*.md`)
 - [Stack and decisions](docs/stack.md): tools and the decisions behind them
 - [Running corral](docs/running.md): configuration and deployment

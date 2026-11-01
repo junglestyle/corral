@@ -32,8 +32,6 @@ an org rule, it says so, and it wins.
 ## Docs
 
 - The [spec](SPEC.md) is where the docs describe what a user can observe. It doesn't carry a second copy of the logic.
-- A deferred requirement stays in the [spec](SPEC.md) and gets a later slice in the roadmap, which for now is the
-  spec's [milestones](SPEC.md#milestones) (see Known deviations).
 
 ## Prose
 
@@ -44,15 +42,6 @@ an org rule, it says so, and it wins.
 
 Where Corral doesn't follow the org standards yet. These are debt to pay down, not overrides: each one should go.
 
-- Dependencies: FastAPI and uvicorn have no ADR in [stack.md](stack.md), only a row in its table.
-- Privacy: examples use host names that aren't under `example.com`: `http://nas:8700` in [running.md](running.md)
-  (lines 7 and 132), and `http://consumer:8000` in `examples/server.toml` (line 22).
-- Docs: [SPEC.md](SPEC.md)'s requirements are numbered 1–5 under one heading, not grouped by area, each opening with
-  an ID and a name (`**QUEUE-1: Name.**`), and it has no Unknowns or Open questions section.
-- Docs: the build order is the [spec](SPEC.md)'s [milestones](SPEC.md#milestones), not numbered slices in a
-  `docs/ROADMAP.md` with `Status:`, `Delivers:` and `Done when:`.
-- Prose: [SPEC.md](SPEC.md)'s speech pipeline example says Hearsay runs "on hourly timers today" (line 221), a dated
-  claim that's no longer true: Hearsay's install docs run that pipeline on corral.
 - Containers: `examples/compose.yaml` uses host networking (line 12) and has the server listen on `CORRAL_HOST` (line
   15), not on `0.0.0.0` behind a port published to a named address. The file says why, but nothing here overrides
   the rule.
