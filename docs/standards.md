@@ -57,12 +57,3 @@ Where Corral doesn't follow the org standards yet. These are debt to pay down, n
   15), not on `0.0.0.0` behind a port published to a named address. The file says why, but nothing here overrides
   the rule.
 - Containers: `examples/compose.yaml` sets no `logging:`.
-- Python: `JobSpec` (`queue.py` line 40) is a pydantic model, and the queue takes it as its input, so pydantic reaches
-  past the HTTP edge. The other request bodies are unpacked into plain values in `server.py`.
-- Python: `tests/test_queue.py` (line 191) checks only that the `CHECK`s on `jobs.state` and `jobs.stop` accept every
-  `JobState` and `Stop` value and refuse one other, not that each `StrEnum` is exactly its column's `CHECK` list.
-- Python: the queue raises two exception types, `NotFound` and `Conflict` (`queue.py` lines 59 and 63), and the client
-  raises `LeaseLost` (`client.py` line 21), not one `<Thing>Error(Exception)` per boundary.
-- Python: worker config errors put the kind's name in without `!r` (`worker.py` lines 58, 75 and 79).
-- Python: `corral.cli` configures its own timestamps (`%(asctime)s`, `cli.py` line 65). python.md leaves timestamps to
-  journald or Docker.

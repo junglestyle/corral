@@ -5,6 +5,7 @@ import pytest
 
 from corral.queue import JobSpec, Queue
 from corral.records import Proc
+from corral.server import JobRequest
 
 
 class Clock:
@@ -25,8 +26,13 @@ def q(tmp_path: Path, clock: Clock) -> Queue:
     return Queue(str(tmp_path / "q.sqlite"), clock=clock)
 
 
+def spec(kind: str = "k", **kw: object) -> JobSpec:
+    """A spec built the way the server builds one, defaults included."""
+    return JobRequest.model_validate({"kind": kind, **kw}).spec()
+
+
 def add(q: Queue, kind: str = "k", **kw: object) -> int:
-    job, _ = q.enqueue(JobSpec.model_validate({"kind": kind, **kw}))
+    job, _ = q.enqueue(spec(kind, **kw))
     return job.id
 
 

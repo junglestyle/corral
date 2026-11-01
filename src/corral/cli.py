@@ -62,7 +62,7 @@ def main(argv: list[str] | None = None) -> None:
         p.add_argument("job", type=int)
 
     args = parser.parse_args(argv)
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
     if args.command == "server":

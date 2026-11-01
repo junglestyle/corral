@@ -18,7 +18,7 @@ LEASE = TypeAdapter(Lease)
 WORKERS = TypeAdapter(list[Worker])
 
 
-class LeaseLost(Exception):
+class LeaseLostError(Exception):
     """The server no longer considers this lease ours."""
 
 
@@ -78,7 +78,7 @@ class Client:
         """Returns True when the server wants the job killed."""
         response = self.http.post(f"/leases/{lease_id}/heartbeat", json={"foreign": _procs(foreign)})
         if response.status_code == 409:
-            raise LeaseLost(lease_id)
+            raise LeaseLostError(lease_id)
         response.raise_for_status()
         return bool(response.json()["kill"])
 
@@ -87,7 +87,7 @@ class Client:
             f"/leases/{lease_id}/finish", json={"exit_code": exit_code, "result": result}
         )
         if response.status_code == 409:
-            raise LeaseLost(lease_id)
+            raise LeaseLostError(lease_id)
         response.raise_for_status()
 
 

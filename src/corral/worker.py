@@ -16,7 +16,7 @@ from typing import Any
 
 import httpx
 
-from corral.client import Client, LeaseLost
+from corral.client import Client, LeaseLostError
 from corral.duration import parse_duration
 from corral.records import Lease, Proc
 
@@ -55,7 +55,7 @@ def load_config(path: Path) -> Config:
     for drop_in in sorted((path.parent / "kinds.d").glob("*.toml")):
         for name, kind in _kinds(drop_in, _read(drop_in)).items():
             if name in kinds:
-                raise SystemExit(f"{drop_in}: kind {name} is already configured")
+                raise SystemExit(f"{drop_in}: kind {name!r} is already configured")
             kinds[name] = kind
     return Config(name=raw["name"], offers=raw.get("offers", []), kinds=kinds, ignore=raw.get("ignore", []))
 
@@ -72,11 +72,11 @@ def _kinds(path: Path, raw: dict[str, Any]) -> dict[str, Kind]:
     for name, k in raw.get("kinds", {}).items():
         argv = k.get("argv")
         if not isinstance(argv, list) or not argv or not all(isinstance(a, str) for a in argv):
-            raise SystemExit(f"{path}: kind {name} needs argv, a non-empty list of strings")
+            raise SystemExit(f"{path}: kind {name!r} needs argv, a non-empty list of strings")
         try:
             timeout = parse_duration(k["timeout"]) if "timeout" in k else None
         except ValueError as e:
-            raise SystemExit(f"{path}: kind {name}: {e}") from None
+            raise SystemExit(f"{path}: kind {name!r}: {e}") from None
         kinds[name] = Kind(argv=argv, timeout=timeout)
     return kinds
 
@@ -131,7 +131,7 @@ def run_job(config: Config, client: Client, job: Lease) -> None:
         try:
             client.finish(job.lease_id, exit_code, result)
             return
-        except LeaseLost:
+        except LeaseLostError:
             log.warning("job %s: lease lost before finish, outcome dropped", job.id)
             return
         except httpx.TransportError as e:
@@ -161,7 +161,7 @@ def _supervise(
         try:
             stop = client.heartbeat(job.lease_id, foreign)
             lease_ok_until = time.monotonic() + job.lease_seconds
-        except LeaseLost:
+        except LeaseLostError:
             log.warning("job %s: lease lost, killing", job.id)
             _kill(proc)
             return None
