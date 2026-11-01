@@ -11,19 +11,46 @@ the work needs, and gets out of the way of a machine that's been paused.
 
 ## Requirements
 
-1. **Pause and drain.** A paused worker finishes its current job, takes nothing new, and stays paused until resumed
-   or until a set time runs out.
-2. **Completion contract.** A finished job can enqueue follow-on jobs and notify anything that subscribes, so
-   pipelines chain without clocks.
-3. **Priorities with aging.** Higher priority runs first. Waiting raises a job's effective priority, so low work
-   can't starve.
-4. **Workload awareness.** A worker notices when something other than corral is using its GPU, stops taking GPU
-   work while that lasts, and raises an alert when it blocks queued work for too long.
-5. **Chunking hints.** A job can be told how much work it can likely finish within a time window, so a worker frees
-   up predictably. The hint is advisory.
+Each requirement has an ID the [roadmap](ROADMAP.md) cites. A deferred requirement stays here and gets a later slice
+there. The sections after this one describe the behavior in full.
 
-Out of scope for now: more than one job per worker at a time, job
-dependencies beyond `then`, and multi-user anything.
+### Queue
+
+- **QUEUE-1: Priorities with aging.** Higher priority runs first. Waiting raises a job's effective priority, so low
+  work can't starve.
+- **QUEUE-2: Coalescing.** Enqueueing a key that's already queued adds nothing and returns the queued job.
+- **QUEUE-3: Crash recovery.** A job whose worker dies or loses the network goes back to the queue, until it has
+  used its attempts.
+
+### Control
+
+- **CONTROL-1: Pause and drain.** A paused worker finishes its current job, takes nothing new, and stays paused
+  until resumed or until a set time runs out.
+- **CONTROL-2: Kill and cancel.** A running job can be stopped and requeued, and any job removed for good.
+
+### Chains
+
+- **CHAIN-1: Follow-on jobs.** A job that succeeds enqueues the specs in its `then`, so pipelines chain without
+  clocks.
+- **CHAIN-2: Completion events.** A finished job notifies the webhooks that subscribe to it.
+
+### GPU
+
+- **GPU-1: Foreign GPU use.** A worker stops taking GPU work while something other than corral uses its GPU.
+- **GPU-2: Block alert.** The server raises an alert when foreign use holds up queued GPU work for too long.
+
+### Hints
+
+- **HINT-1: Chunking hints.** A job can be told how much work it can likely finish within a time window, so a
+  worker frees up predictably. The hint is advisory.
+
+### Access
+
+- **ACCESS-1: One token.** Every API call needs the bearer token. The dashboard page is the one exception.
+
+### Dashboard
+
+- **DASH-1: Dashboard.** A page on the server shows workers, the queue and history, and pauses and resumes.
 
 ## Pieces
 
@@ -218,7 +245,7 @@ Heartbeat and finish answer `409` when the lease id is no longer current. Enqueu
 
 [Hearsay](https://github.com/junglestyle/hearsay) assembles captured audio into conversations on a NAS,
 transcribes them on a GPU host, folds the transcripts back in on the NAS, and hands off to
-[Idea Machine](https://github.com/junglestyle/ideamachine), all on hourly timers today.
+[Idea Machine](https://github.com/junglestyle/ideamachine).
 
 | Step | Kind | Needs |
 | --- | --- | --- |
@@ -231,11 +258,27 @@ When a capture arrives, the receiver enqueues the first step with the rest neste
 `key`, so captures that arrive while the chain is waiting add nothing, and coalescing never drops a later step. The
 same kind appears twice under two keys. An hourly timer enqueues the same chain as a safety net.
 
-## Milestones
+## Unknowns
 
-1. Spec and skeleton (this document).
-2. Server, worker, and CLI: queue, aging, leases, pause, kill, `then`, `key`, and foreign-GPU blocking on the
-   worker.
-3. First real consumer: the speech pipeline above, running end to end on `then` and `key`.
-4. Webhooks, including the `worker.blocked` alert, and chunking hints, averaged from the consumer's real timings.
-5. Dashboard, served by the server over the same API: queue, history, workers, pause and resume.
+What the spec assumes without having checked:
+
+- That `nvidia-smi --query-compute-apps` lists every foreign compute process, including ones in containers, with
+  PIDs the worker can tell apart from its own job's.
+- That SQLite in WAL mode behaves on a NAS's data pool (ZFS, say), fsync included.
+- That a kind's seconds per item is steady enough for an average weighted 0.3 to the newest run to predict a window.
+- That up to 30 s before a GPU job notices foreign use is short enough for the person who just took the GPU.
+- That on a private network, one shared token over plain HTTP is enough.
+
+## Open questions
+
+Raised here, not decided:
+
+- **Foreign use and a running job.** A job already running when foreign GPU use appears is left alone, with the
+  alert as the backstop. Killing it automatically would free the GPU sooner, at the cost of lost work.
+- **Workers that go away.** A worker that stops appearing stays in `corral ls` with its last-seen time. It could
+  drop out after a while.
+- **Dropped events.** A webhook delivery that's still failing after a day is dropped silently. It could raise
+  something.
+- **Fan-in.** `then` only chains forward. A job can't wait on more than one other job.
+- **More than one job per worker.** A worker runs one job at a time.
+- **More than one user.** Everyone shares one token and one queue.

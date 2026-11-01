@@ -4,7 +4,7 @@ Everything talks to the server with two environment variables:
 
 | Variable | Meaning |
 | --- | --- |
-| `CORRAL_URL` | The server, e.g. `http://nas:8700` |
+| `CORRAL_URL` | The server, e.g. `http://corral.example.com:8700` |
 | `CORRAL_TOKEN` | Shared bearer token. The server refuses to start without it. |
 
 ## Server
@@ -131,7 +131,7 @@ corral cancel 42               # remove for good
 
 ## Dashboard
 
-Open the server's address, e.g. `http://nas:8700/`, and give it `CORRAL_TOKEN` once; the browser keeps it until a
+Open the server's address, e.g. `http://corral.example.com:8700/`, and give it `CORRAL_TOKEN` once; the browser keeps it until a
 request is refused. The page refreshes every 5 s and shows:
 
 - **Workers**: the same states and notes as `corral ls`, with pause, pause now (after a confirmation) and resume

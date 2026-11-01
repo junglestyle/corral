@@ -37,3 +37,12 @@ from source and cache by content are already safe to rerun.
 The server is an HTTP service and a SQLite file, so a container is the simplest thing that survives reboots and
 upgrades on a NAS. A worker spawns jobs on its host, uses its Docker, and watches its GPU for other processes. In a
 container it would need the Docker socket, the GPU, and the host's PID namespace, so it runs on the host.
+
+## ADR-006: FastAPI and uvicorn for the API
+
+The server holds lease requests open for up to 30 s, runs housekeeping (lease expiry, block alerts, webhook
+delivery) whether or not requests come in, and validates every request body. FastAPI on uvicorn covers all three
+in one process: an async handler holds a long poll without tying up a thread, the lifespan hook runs housekeeping
+beside the requests, and pydantic checks bodies at the edge. The stdlib's `http.server` would mean writing routing,
+validation and token checks by hand, plus a thread per waiting worker. uvicorn also handles SIGTERM, so the server
+stops cleanly as PID 1 in Docker.
