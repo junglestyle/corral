@@ -49,6 +49,10 @@ class Job:
     state: JobState
     attempts: int
     max_attempts: int
+    wait_seconds: float | None
+    quiet_seconds: float
+    # When the job's wait runs out, while it's held; None once it may be leased.
+    held_until: str | None
     worker: str | None
     stopping: bool
     enqueued_at: str

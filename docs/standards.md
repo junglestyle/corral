@@ -17,9 +17,9 @@ an org rule, it says so, and it wins.
 
 ## Testing
 
-- The behaviors worth a test: ordering and aging, lease expiry, pause and drain, kill, `then`, coalescing, crash
-  recovery, the bearer token, which events reach which webhooks and when the block alert fires, and the chunking
-  hint.
+- The behaviors worth a test: ordering and aging, lease expiry, pause and drain, kill, `then`, coalescing, held jobs,
+  crash recovery, the bearer token, which events reach which webhooks and when the block alert fires, and the
+  chunking hint.
 
 ## Running it
 

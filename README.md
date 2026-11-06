@@ -32,6 +32,8 @@ flowchart LR
   until `corral resume` or for as long as you said (`--for 2h`), across restarts.
 - **Chained work.** A job can name the jobs to enqueue when it succeeds, and the server posts a finished event to
   any webhook that wants it.
+- **Waits for its input.** A held job doesn't run while anything queued or running would enqueue it, for up to a
+  set time, so a step that processes everything pending runs once per burst instead of once per item.
 - **Knows when it's not alone.** A worker sees other programs on its GPU, stops taking GPU work until they're
   gone, and alerts when that holds up the queue.
 - **Sized to a window.** A job is told how many items it can likely finish in its kind's time window, based on how

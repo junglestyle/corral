@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 from conftest import Clock, add, lease, spec
+from pydantic import ValidationError
 
 import corral
 from corral.queue import ALL, LEASE_SECONDS, Queue, QueueError, Stop
@@ -78,6 +79,60 @@ def test_key_coalesces_only_while_queued(q: Queue) -> None:
     # Once it's running it may already have missed new input, so the next one queues.
     _, created_while_running = q.enqueue(spec(key="batch"))
     assert created_while_running
+
+
+def test_held_job_waits_while_anything_would_enqueue_its_key(q: Queue) -> None:
+    # The key sits two steps down the chain, so the whole chain counts.
+    add(q, "a", then=[{"kind": "b", "then": [{"kind": "k", "key": "fold"}]}])
+    held = add(q, key="fold", wait_seconds=1800)
+    assert q.get(held).held_until is not None
+    for kind in ("a", "b"):
+        assert lease(q) is None
+        q.finish(lease(q, kinds=(kind,)).lease_id, 0, None)
+    # b's success coalesced into the held job, and nothing left would enqueue its key.
+    assert [j.id for j in q.jobs(["queued"])] == [held]
+    assert lease(q).id == held
+
+
+def test_held_job_fires_at_its_deadline_and_the_next_trigger_waits_anew(q: Queue, clock: Clock) -> None:
+    add(q, "a", then=[{"kind": "k", "key": "fold", "wait_seconds": 1800}])  # never leased: always upstream
+    held = add(q, key="fold", wait_seconds=1800)
+    clock.t += 1799
+    add(q, key="fold", wait_seconds=1800)  # coalescing doesn't push the deadline back
+    assert lease(q) is None
+    clock.t += 1
+    assert lease(q).id == held
+    later, created = q.enqueue(spec(key="fold", wait_seconds=1800))
+    assert created and later.held_until is not None and lease(q, "w2") is None
+
+
+def test_release_ends_a_hold_and_only_applies_while_queued(q: Queue) -> None:
+    add(q, "a", then=[{"kind": "k", "key": "fold"}])  # never leased: always upstream
+    held = add(q, key="fold", wait_seconds=1800, quiet_seconds=600)
+    assert lease(q) is None
+    q.release(held)
+    assert lease(q).id == held
+    with pytest.raises(QueueError):
+        q.release(held)
+
+
+def test_quiet_holds_until_enqueues_stop_but_not_past_the_wait(q: Queue, clock: Clock) -> None:
+    settles = add(q, key="settles", wait_seconds=600, quiet_seconds=120)
+    busy = add(q, "busy", key="busy", wait_seconds=600, quiet_seconds=120)
+    for _ in range(5):
+        clock.t += 100
+        add(q, "busy", key="busy", wait_seconds=600, quiet_seconds=120)
+    # settles was last enqueued 500 s ago; busy 0 s ago, but its 600 s are up at the next tick.
+    assert lease(q).id == settles
+    assert lease(q, "w2", kinds=("busy",)) is None
+    clock.t += 100
+    assert lease(q, "w2", kinds=("busy",)).id == busy
+
+
+@pytest.mark.parametrize("fields", [{"wait_seconds": 60}, {"key": "k", "quiet_seconds": 60}])
+def test_holding_needs_a_key_and_a_wait(fields: dict[str, object]) -> None:
+    with pytest.raises(ValidationError):
+        spec(**fields)
 
 
 def test_pause_drains_then_holds(q: Queue) -> None:

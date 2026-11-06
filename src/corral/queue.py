@@ -46,6 +46,9 @@ class JobSpec:
     key: str | None
     then: list[JobSpec]
     max_attempts: int
+    # A held job waits for at most wait_seconds from when it's created; see _held_until.
+    wait_seconds: float | None
+    quiet_seconds: float
 
 
 @dataclass(frozen=True)
@@ -96,19 +99,21 @@ class Queue:
         """Returns the job and whether it was created; an existing queued job with the same key wins."""
         with self._tx() as db:
             job_id, created = self._enqueue(db, spec)
-            return _job(self._row(db, job_id)), created
+            return self._view(self._row(db, job_id), self._upstream(db)), created
 
     def get(self, job_id: int) -> Job:
         with self._tx() as db:
             self._expire(db)
-            return _job(self._row(db, job_id))
+            return self._view(self._row(db, job_id), self._upstream(db))
 
     def jobs(self, states: list[JobState], limit: int = 100) -> list[Job]:
         with self._tx() as db:
             self._expire(db)
             where = f"WHERE state IN ({','.join('?' * len(states))})" if states else ""
-            rows = db.execute(f"SELECT * FROM jobs {where} ORDER BY id DESC LIMIT ?", (*states, limit))
-            return [_job(r) for r in rows]
+            sql = f"SELECT * FROM jobs {where} ORDER BY id DESC LIMIT ?"
+            rows = db.execute(sql, (*states, limit)).fetchall()
+            upstream = self._upstream(db)
+            return [self._view(r, upstream) for r in rows]
 
     def lease(self, worker: str, offers: list[str], kinds: list[str], foreign: list[Proc]) -> Lease | None:
         now = self.clock()
@@ -124,13 +129,14 @@ class Queue:
                 return None
 
             have = set(offers)
+            upstream = self._upstream(db)
             candidates = [
                 r
                 for r in db.execute(
                     f"SELECT * FROM jobs WHERE state = ? AND kind IN ({','.join('?' * len(kinds))})",
                     (JobState.QUEUED, *kinds),
                 )
-                if set(json.loads(r["needs"])) <= have
+                if set(json.loads(r["needs"])) <= have and _held_until(r, now, upstream) is None
             ]
             if not candidates:
                 return None
@@ -189,6 +195,16 @@ class Queue:
                 db.execute("UPDATE jobs SET stop = ? WHERE id = ?", (Stop.CANCEL, job_id))
             else:
                 raise QueueError(f"job {job_id} already {row['state']}")
+            return _job(self._row(db, job_id))
+
+    def release(self, job_id: int) -> Job:
+        """Ends a queued job's hold, so it's leased as soon as a worker can take it."""
+        with self._tx() as db:
+            self._expire(db)
+            row = self._row(db, job_id)
+            if row["state"] != JobState.QUEUED:
+                raise QueueError(f"job {job_id} is {row['state']}, not queued")
+            db.execute("UPDATE jobs SET wait_seconds = NULL, quiet_seconds = 0 WHERE id = ?", (job_id,))
             return _job(self._row(db, job_id))
 
     def pause(self, name: str, now: bool = False, for_seconds: float | None = None) -> None:
@@ -291,17 +307,21 @@ class Queue:
         )
 
     def _enqueue(self, db: sqlite3.Connection, spec: JobSpec) -> tuple[int, bool]:
+        now = self.clock()
         if spec.key is not None:
             hit = db.execute(
                 "SELECT id FROM jobs WHERE state = ? AND key = ? ORDER BY id LIMIT 1",
                 (JobState.QUEUED, spec.key),
             ).fetchone()
             if hit:
+                # The one thing a coalesced enqueue changes: a held job's quiet period starts again.
+                db.execute("UPDATE jobs SET last_enqueued_at = ? WHERE id = ?", (now, hit["id"]))
                 return int(hit["id"]), False
         cur = db.execute(
             """INSERT INTO jobs
-               (kind, needs, priority, args, key, then_specs, max_attempts, state, enqueued_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               (kind, needs, priority, args, key, then_specs, max_attempts, wait_seconds, quiet_seconds,
+                state, enqueued_at, last_enqueued_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 spec.kind,
                 json.dumps(spec.needs),
@@ -310,8 +330,11 @@ class Queue:
                 spec.key,
                 json.dumps([asdict(t) for t in spec.then]),
                 spec.max_attempts,
+                spec.wait_seconds,
+                spec.quiet_seconds,
                 JobState.QUEUED,
-                self.clock(),
+                now,
+                now,
             ),
         )
         assert cur.lastrowid is not None
@@ -414,15 +437,18 @@ class Queue:
                AND name NOT IN (SELECT worker FROM jobs WHERE state = ?)""",
             (now - self.settings.block_alert_after, now - LEASE_SECONDS, JobState.LEASED),
         ).fetchall()
+        upstream = self._upstream(db) if blocked else {}
         for w in blocked:
             if self._paused(db, w["name"]):
                 continue
             kinds = json.loads(w["kinds"])
             marks = ",".join("?" * len(kinds))
             queued = db.execute(
-                f"SELECT needs FROM jobs WHERE state = ? AND kind IN ({marks})", (JobState.QUEUED, *kinds)
+                f"SELECT * FROM jobs WHERE state = ? AND kind IN ({marks})", (JobState.QUEUED, *kinds)
             )
-            waiting = sum("gpu" in json.loads(r["needs"]) for r in queued)
+            waiting = sum(
+                "gpu" in json.loads(r["needs"]) and _held_until(r, now, upstream) is None for r in queued
+            )
             if not waiting:
                 continue
             self._emit(
@@ -479,6 +505,26 @@ class Queue:
     def _effective(self, row: sqlite3.Row, now: float) -> float:
         return float(row["priority"] + (now - row["enqueued_at"]) / self.settings.aging_seconds)
 
+    def _upstream(self, db: sqlite3.Connection) -> dict[str, set[int]]:
+        """Each key some queued or running job would enqueue on success, anywhere in its `then`, and those
+        jobs' ids."""
+        out: dict[str, set[int]] = {}
+        rows = db.execute(
+            "SELECT id, then_specs FROM jobs WHERE state IN (?, ?) AND then_specs != '[]'",
+            (JobState.QUEUED, JobState.LEASED),
+        )
+        for r in rows:
+            pending = json.loads(r["then_specs"])
+            while pending:
+                s = pending.pop()
+                if s["key"] is not None:
+                    out.setdefault(s["key"], set()).add(r["id"])
+                pending.extend(s["then"])
+        return out
+
+    def _view(self, row: sqlite3.Row, upstream: dict[str, set[int]]) -> Job:
+        return _job(row, _held_until(row, self.clock(), upstream))
+
     def _row(self, db: sqlite3.Connection, job_id: int) -> sqlite3.Row:
         row: sqlite3.Row | None = db.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
         if row is None:
@@ -494,7 +540,24 @@ class Queue:
         return row
 
 
-def _job(row: sqlite3.Row) -> Job:
+def _held_until(row: sqlite3.Row, now: float, upstream: dict[str, set[int]]) -> float | None:
+    """When a held job's wait runs out, or None if it may be leased now.
+
+    A job with wait_seconds is held until it's first leased, while another queued or running job would
+    enqueue its key or it was enqueued less than quiet_seconds ago, but never past wait_seconds after it was
+    created.
+    """
+    if row["wait_seconds"] is None or row["state"] != JobState.QUEUED or row["started_at"] is not None:
+        return None
+    until = float(row["enqueued_at"] + row["wait_seconds"])
+    if now >= until:
+        return None
+    quiet = now < row["last_enqueued_at"] + row["quiet_seconds"]
+    feeding = upstream.get(row["key"], set()) - {row["id"]}
+    return until if quiet or feeding else None
+
+
+def _job(row: sqlite3.Row, held_until: float | None = None) -> Job:
     return Job(
         id=row["id"],
         kind=row["kind"],
@@ -506,6 +569,9 @@ def _job(row: sqlite3.Row) -> Job:
         state=JobState(row["state"]),
         attempts=row["attempts"],
         max_attempts=row["max_attempts"],
+        wait_seconds=row["wait_seconds"],
+        quiet_seconds=row["quiet_seconds"],
+        held_until=_iso_or_none(held_until),
         worker=row["worker"],
         stopping=row["stop"] is not None,
         enqueued_at=_iso(row["enqueued_at"]),
@@ -551,11 +617,14 @@ def _spec(row: sqlite3.Row) -> JobSpec:
         key=row["key"],
         then=[_stored_spec(t) for t in json.loads(row["then_specs"])],
         max_attempts=row["max_attempts"],
+        wait_seconds=row["wait_seconds"],
+        quiet_seconds=row["quiet_seconds"],
     )
 
 
 def _stored_spec(d: dict[str, Any]) -> JobSpec:
-    """A `then` spec as the queue stored it: every field present, and checked when it was enqueued."""
+    """A `then` spec as the queue stored it, checked when it was enqueued. Ones stored before held jobs lack
+    their fields."""
     return JobSpec(
         kind=d["kind"],
         needs=d["needs"],
@@ -564,4 +633,6 @@ def _stored_spec(d: dict[str, Any]) -> JobSpec:
         key=d["key"],
         then=[_stored_spec(t) for t in d["then"]],
         max_attempts=d["max_attempts"],
+        wait_seconds=d.get("wait_seconds"),
+        quiet_seconds=d.get("quiet_seconds", 0),
     )

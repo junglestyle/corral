@@ -39,6 +39,8 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--args", default="{}", help="JSON object")
     p.add_argument("--key", help="coalescing key")
     p.add_argument("--then", default="[]", help="JSON list of job specs to enqueue on success")
+    p.add_argument("--wait", type=parse_duration, help="hold while anything feeds the key, at most this long")
+    p.add_argument("--quiet", type=parse_duration, help="with --wait, hold until enqueues stop this long")
 
     p = sub.add_parser("ls", help="list workers and jobs")
     p.add_argument(
@@ -57,7 +59,11 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("resume", help="let a worker take jobs again")
     p.add_argument("worker", help=f"worker name, or {ALL}")
 
-    for name, text in (("kill", "stop a running job and requeue it"), ("cancel", "remove a job for good")):
+    for name, text in (
+        ("kill", "stop a running job and requeue it"),
+        ("cancel", "remove a job for good"),
+        ("release", "end a held job's wait now"),
+    ):
         p = sub.add_parser(name, help=text)
         p.add_argument("job", type=int)
 
@@ -81,6 +87,8 @@ def main(argv: list[str] | None = None) -> None:
             "args": json.loads(args.args),
             "key": args.key,
             "then": json.loads(args.then),
+            "wait_seconds": args.wait,
+            "quiet_seconds": args.quiet or 0,
         }
         job, created = client.enqueue(spec)
         print(job.id if created else f"{job.id} (already queued with key {job.key})")
@@ -94,6 +102,8 @@ def main(argv: list[str] | None = None) -> None:
         client.kill(args.job)
     elif args.command == "cancel":
         client.cancel(args.job)
+    elif args.command == "release":
+        client.release(args.job)
 
 
 def serve(db: str, host: str, port: int, settings: Settings) -> None:
@@ -118,6 +128,8 @@ def show(workers: list[Worker], jobs: list[Job]) -> None:
     rows = [["JOB", "STATE", "PRI", "KIND", "WORKER", "TRIES", "ENQUEUED"]]
     for j in jobs:
         state = j.state + (" (stopping)" if j.stopping else "")
+        if j.held_until:
+            state += f" (held until {j.held_until})"
         worker = j.worker if j.state == JobState.LEASED else ""
         tries = f"{j.attempts}/{j.max_attempts}"
         rows.append([str(j.id), state, str(j.priority), j.kind, worker or "", tries, j.enqueued_at])
