@@ -56,6 +56,9 @@ class Client:
     def cancel(self, job_id: int) -> Job:
         return JOB.validate_json(self._call("POST", f"/jobs/{job_id}/cancel").content)
 
+    def release(self, job_id: int) -> Job:
+        return JOB.validate_json(self._call("POST", f"/jobs/{job_id}/release").content)
+
     def workers(self) -> list[Worker]:
         return WORKERS.validate_json(self._call("GET", "/workers").content)
 

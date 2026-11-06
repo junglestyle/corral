@@ -172,7 +172,8 @@ function workerRow(w) {
 }
 
 function stateOf(j) {
-  return el("span", j.state + (j.stopping ? " (stopping)" : ""), `state-${j.state}`);
+  const note = (j.stopping ? " (stopping)" : "") + (j.held_until ? ` (held until ${when(j.held_until).textContent})` : "");
+  return el("span", j.state + note, `state-${j.state}`);
 }
 
 function result(j) {

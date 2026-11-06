@@ -7,7 +7,8 @@ arrives between ticks waits at every step, and the machines sit idle in between.
 those machines for themselves, the timers don't know.
 
 Corral is a resource-aware work queue. It runs work when it arrives, in priority order, on whichever machine has what
-the work needs, and gets out of the way of a machine that's been paused.
+the work needs, and gets out of the way of a machine that's been paused. Work that's cheaper done in bulk can instead
+wait, for a bounded time, until whatever feeds it has finished.
 
 ## Requirements
 
@@ -21,6 +22,8 @@ there. The sections after this one describe the behavior in full.
 - **QUEUE-2: Coalescing.** Enqueueing a key that's already queued adds nothing and returns the queued job.
 - **QUEUE-3: Crash recovery.** A job whose worker dies or loses the network goes back to the queue, until it has
   used its attempts.
+- **QUEUE-4: Held jobs.** A job can wait while anything queued or running would enqueue its key, for at most a set
+  time, so a step that processes everything pending runs once per burst of input rather than once per item.
 
 ### Control
 
@@ -60,7 +63,7 @@ there. The sections after this one describe the behavior in full.
 - **Dashboard.** A page served by the server: workers, the queue, recent history, and pause and resume. It reads
   and pauses through the same API and token as the CLI, so it never talks to workers directly.
 - **CLI.** `corral` talks to the server for everything: `server`, `worker`, `enqueue`, `ls`, `pause`, `resume`,
-  `kill`, `cancel`.
+  `kill`, `cancel`, `release`.
 
 Every call uses one bearer token from the environment, and the API is meant for a private network. Jobs carry
 references (paths, ids), never payloads, so data stays where it lives.
@@ -76,11 +79,13 @@ A job has:
 | `needs` | Capability labels, e.g. `["gpu"]`. A worker can run the job if it offers all of them and has the kind configured. |
 | `priority` | Integer 0-9, higher first. Default 5. |
 | `args` | Small JSON object passed to the job |
-| `key` | Optional coalescing key. Enqueueing a key that is already queued does nothing and returns the queued job. |
+| `key` | Optional coalescing key. Enqueueing a key that is already queued does nothing and returns the queued job, except restart a held job's quiet period. |
 | `then` | Optional list of job specs to enqueue on success. Each is a full spec: fields it leaves out take the defaults above, not the parent's values. |
 | `state` | `queued`, `leased`, `succeeded`, `failed`, `cancelled` |
 | `attempts` | Leases so far |
 | `max_attempts` | Default 3. A job that exits non-zero or loses its lease is requeued until it has used them all, then `failed`. |
+| `wait_seconds` | Optional. Makes the job [held](#held-jobs) for at most this long. Needs a `key`. |
+| `quiet_seconds` | Optional, default 0. While held, the job also waits until its key hasn't been enqueued for this long. Needs `wait_seconds`. |
 
 `key` is what makes streaming input cheap. Ten items arriving in a minute can each enqueue a step that processes
 everything pending, and only one of those waits in the queue.
@@ -93,6 +98,24 @@ waiting job with the highest effective priority that a worker can run goes first
 Each `aging_seconds` of waiting is worth one priority point, and aging is uncapped. With the default, a priority-0
 job that has waited nine hours ties a brand-new priority-9 job. That is the intent: priority decides the order of
 work that arrives together, and nothing waits forever.
+
+### Held jobs
+
+A job with `wait_seconds` is held: it stays `queued` but isn't leased while either of these is true:
+
+- Another queued or running job would enqueue its key when it succeeds, anywhere in its `then`, however deep.
+- It was enqueued, or an enqueue coalesced into it, less than `quiet_seconds` ago.
+
+It's released when neither is, or `wait_seconds` after it was created, whichever comes first. Coalescing never moves
+that deadline. Once leased it's an ordinary job: a kill or a lost lease requeues it without holding it again, and
+the next enqueue of its key creates a new held job with a wait of its own. So while its input keeps coming, a held
+step runs about once per `wait_seconds`, and once the input stops, it runs as soon as nothing feeds it.
+
+What feeds a held job is read from the `then` of the jobs in the queue, so it's defined once, by the chains. Held
+time counts as waiting for [aging](#ordering-and-aging). `corral ls` and the dashboard show a held job's deadline.
+
+`corral release 42` ends a queued job's hold, so it runs as soon as a worker can take it: an "apply now" for work
+that would otherwise wait out its quiet period.
 
 ### Leases
 
@@ -229,6 +252,7 @@ the hint.
 | `GET` | `/jobs/{id}` | One job |
 | `POST` | `/jobs/{id}/kill` | Kill a leased job and requeue it |
 | `POST` | `/jobs/{id}/cancel` | Cancel a queued job, or kill and cancel a leased one |
+| `POST` | `/jobs/{id}/release` | End a queued job's hold |
 | `POST` | `/lease` | Worker asks for a job (long poll) |
 | `POST` | `/leases/{id}/heartbeat` | Extend |
 | `POST` | `/leases/{id}/finish` | Exit status and result |
@@ -258,6 +282,10 @@ When a capture arrives, the receiver enqueues the first step with the rest neste
 `key`, so captures that arrive while the chain is waiting add nothing, and coalescing never drops a later step. The
 same kind appears twice under two keys. An hourly timer enqueues the same chain as a safety net.
 
+Transcription takes a backlog in [chunks](#chunking-hints), and its `then` runs after each one. With `wait_seconds`
+set, the fold step is held while transcription or the assembly before it would enqueue it, so a long backlog is
+folded at least every `wait_seconds` and once at the end, not after every chunk.
+
 ## Unknowns
 
 What the spec assumes without having checked:
@@ -279,6 +307,7 @@ Raised here, not decided:
   drop out after a while.
 - **Dropped events.** A webhook delivery that's still failing after a day is dropped silently. It could raise
   something.
-- **Fan-in.** `then` only chains forward. A job can't wait on more than one other job.
+- **Fan-in.** `then` only chains forward. A held job waits for whatever would enqueue its key, but a job can't wait
+  on particular other jobs.
 - **More than one job per worker.** A worker runs one job at a time.
 - **More than one user.** Everyone shares one token and one queue.

@@ -41,3 +41,15 @@ Delivers: DASH-1.
 
 Done when: opening the server's address and giving it the token shows the workers and the queue, and pausing and
 resuming a worker from the page shows up in `corral ls`.
+
+## 4. Held jobs
+
+Status: built in corral and wired in hearsay; not yet deployed
+
+A step that processes everything pending waits while anything would still feed it, up to a set time, so a backlog
+or a burst of input is processed in one run instead of one per chunk or per item.
+
+Delivers: QUEUE-4.
+
+Done when: in the [speech pipeline](SPEC.md#example-a-speech-pipeline), a transcription backlog taken in chunks is
+folded once when it ends, and at least every `wait_seconds` while it lasts, not after every chunk.

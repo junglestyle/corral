@@ -14,7 +14,7 @@ from typing import Annotated, Any
 import httpx
 from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from corral.queue import JobSpec, Queue, QueueError
 from corral.records import Job, JobState, Lease, Proc, Worker
@@ -37,6 +37,17 @@ class JobRequest(BaseModel):
     key: str | None = None
     then: list[JobRequest] = []
     max_attempts: int = Field(3, ge=1)
+    wait_seconds: float | None = Field(None, gt=0)
+    quiet_seconds: float = Field(0, ge=0)
+
+    @model_validator(mode="after")
+    def _held(self) -> JobRequest:
+        # A held job finds what feeds it by its key, and quiet only shortens a wait.
+        if self.wait_seconds is not None and self.key is None:
+            raise ValueError("wait_seconds needs a key")
+        if self.quiet_seconds and self.wait_seconds is None:
+            raise ValueError("quiet_seconds needs wait_seconds")
+        return self
 
     def spec(self) -> JobSpec:
         return JobSpec(
@@ -47,6 +58,8 @@ class JobRequest(BaseModel):
             key=self.key,
             then=[t.spec() for t in self.then],
             max_attempts=self.max_attempts,
+            wait_seconds=self.wait_seconds,
+            quiet_seconds=self.quiet_seconds,
         )
 
 
@@ -116,6 +129,10 @@ def create_app(queue: Queue, token: str) -> FastAPI:
     @api.post("/jobs/{job_id}/cancel")
     def cancel(job_id: int) -> Job:
         return one(queue.cancel, job_id)
+
+    @api.post("/jobs/{job_id}/release")
+    def release(job_id: int) -> Job:
+        return one(queue.release, job_id)
 
     @api.post("/lease", response_model=None)
     async def lease(req: LeaseRequest) -> Lease | Response:

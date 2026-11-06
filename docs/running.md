@@ -120,6 +120,7 @@ Workers run on the host, not in a container (see [ADR-005](stack.md#adr-005-serv
 corral enqueue hearsay.transcribe --needs gpu --key hearsay.transcribe
 corral enqueue hearsay.reprocess --priority 7 --args '{"since": "2026-10-01"}' \
   --then '[{"kind": "ideamachine.run", "key": "ideamachine.run"}]'
+corral enqueue hearsay.reprocess --key hearsay.reprocess:labels --wait 30m --quiet 2m   # held
 corral ls                      # workers, then queued and running jobs
 corral ls --state failed
 corral pause gpu-host --for 2h
@@ -127,6 +128,7 @@ corral pause all --now
 corral resume all
 corral kill 42                 # stop and requeue
 corral cancel 42               # remove for good
+corral release 42              # end a held job's wait now
 ```
 
 ## Dashboard
@@ -137,7 +139,7 @@ request is refused. The page refreshes every 5 s and shows:
 - **Workers**: the same states and notes as `corral ls`, with pause, pause now (after a confirmation) and resume
   per worker, and pause all and resume all. The "pause for" choice applies to every pause button.
 - **Queue**: running jobs, then queued ones, newest first. That isn't the order they'll run in, which depends on
-  aging.
+  aging. A [held](SPEC.md#held-jobs) job says until when.
 - **History**: the 50 most recent finished jobs, newest first, with how long each took and its result.
 
 Kill and cancel stay on the CLI.
